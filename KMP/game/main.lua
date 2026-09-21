@@ -1,11 +1,12 @@
 -- ============================================================
--- KDownloader PM - Versão Final com Velocidade e Rodapé Completo
+-- KDownloader PM - catálogo versionado e transferência BitTorrent
 -- ============================================================
 
-local SCRIPT_URL = "https://script.google.com/macros/s/AKfycby6WpLHqHxdJPI_N6odgK0QYOpV8ob_MFSr2F4_ydKlj6AWbSCDY33GihPqy7TaEAIG/exec"
+local Json = require("json")
+local Catalog = require("catalog")
+local CATALOG_URL = os.getenv("KMP_CATALOG_URL") or ""
 
 local sdPaths = { "/roms/ports", "/roms2/ports" }
-local autoinstallPaths = { "/roms/ports/autoinstall", "/roms2/ports/autoinstall" }
 local sdLabels = { "SD1 (/roms)", "SD2 (/roms2)" }
 local currentSd = 1
 local scrollY = 0
@@ -21,6 +22,11 @@ local logoImg = nil
 local showMenu = false
 local menuSelected = 1
 local powerMenuSelected = 1
+local showSearch = false
+local searchQuery = ""
+local searchSelected = 1
+local searchChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+local showDetails = false
 
 local showRestartPopup = false
 local restartPopupTimer = 0
@@ -31,86 +37,14 @@ local gameToUninstall = nil
 local installedPorts = {}
 local uninstallerSelectedIdx = 1
 local uninstallerScrollY = 0
+local uninstallError = ""
 
 local bgm = nil
 local bgmVolume = 0.5
 local isMusicPaused = false
 
-local function parse_json(str)
-    local pos = 1
-    local function skip_whitespace()
-        while pos <= #str and str:sub(pos, pos):match("%s") do pos = pos + 1 end
-    end
-    local parse_value
-    local function parse_string()
-        pos = pos + 1
-        local start = pos
-        while pos <= #str do
-            local c = str:sub(pos, pos)
-            if c == '"' then
-                local res = str:sub(start, pos - 1)
-                pos = pos + 1
-                return res
-            elseif c == '\\' then pos = pos + 2 else pos = pos + 1 end
-        end
-        return ""
-    end
-    local function parse_number()
-        local start = pos
-        if str:sub(pos, pos) == '-' then pos = pos + 1 end
-        while pos <= #str and str:sub(pos, pos):match("[%d%.eE%+]") do pos = pos + 1 end
-        return tonumber(str:sub(start, pos - 1)) or 0
-    end
-    local function parse_array()
-        pos = pos + 1
-        local arr = {}
-        skip_whitespace()
-        if str:sub(pos, pos) == ']' then pos = pos + 1; return arr end
-        while pos <= #str do
-            table.insert(arr, parse_value())
-            skip_whitespace()
-            local c = str:sub(pos, pos)
-            if c == ']' then pos = pos + 1; return arr
-            elseif c == ',' then pos = pos + 1 else break end
-        end
-        return arr
-    end
-    local function parse_object()
-        pos = pos + 1
-        local obj = {}
-        skip_whitespace()
-        if str:sub(pos, pos) == '}' then pos = pos + 1; return obj end
-        while pos <= #str do
-            skip_whitespace()
-            local key = parse_string()
-            skip_whitespace()
-            if str:sub(pos, pos) == ':' then pos = pos + 1 end
-            skip_whitespace()
-            obj[key] = parse_value()
-            skip_whitespace()
-            local c = str:sub(pos, pos)
-            if c == '}' then pos = pos + 1; return obj
-            elseif c == ',' then pos = pos + 1 else break end
-        end
-        return obj
-    end
-    parse_value = function()
-        skip_whitespace()
-        local c = str:sub(pos, pos)
-        if c == '"' then return parse_string()
-        elseif c == '{' then return parse_object()
-        elseif c == '[' then return parse_array()
-        elseif c:match("[%d%-]") then return parse_number()
-        elseif str:sub(pos, pos + 3) == "true" then pos = pos + 4; return true
-        elseif str:sub(pos, pos + 4) == "false" then pos = pos + 5; return false
-        elseif str:sub(pos, pos + 3) == "null" then pos = pos + 4; return nil end
-        pos = pos + 1
-        return nil
-    end
-    return parse_value()
-end
-
 local catalog = {}
+local catalogAll = {}
 local selectedIdx = 1
 local fontTitle, fontItem, fontSub, fontSmall
 local syncStatus = "Conectando..."
@@ -125,8 +59,6 @@ local download = {
     game = nil,
     statusText = "Aguarde, verificando conexao...",
     statusColor = {0.55, 0.62, 0.72},
-    lastT = nil,
-    lastSize = 0,
     speedBps = 0
 }
 
@@ -136,36 +68,66 @@ local function isInstalled(game)
     local basePorts = sdPaths[currentSd]
     if isWindows() then basePorts = "." end
 
-    local p1 = basePorts .. "/" .. game.name
-    local f1 = io.open(p1, "r")
-    if f1 then f1:close(); return true end
-
-    local p2 = basePorts .. "/" .. game.name .. ".sh"
-    local f2 = io.open(p2, "r")
-    if f2 then f2:close(); return true end
-
+    local manifest = basePorts .. "/.kmp/manifests/" .. game.install.portId .. ".json"
+    local handle = io.open(manifest, "r")
+    if handle then handle:close(); return true end
     return false
 end
 
 local function checkLocalFiles()
-    for _, game in ipairs(catalog) do
+    for _, game in ipairs(catalogAll) do
         game.installed = isInstalled(game)
     end
 end
 
+local function applySearch()
+    catalog = Catalog.search(catalogAll, searchQuery)
+    selectedIdx = 1
+    scrollY = 0
+end
+
 local function scanInstalledPorts()
     installedPorts = {}
+    uninstallError = ""
     local function scanDir(basePath, label)
+        local seen = {}
+        local manifests = io.popen('ls -1 "' .. basePath .. '/.kmp/manifests/"*.json 2>/dev/null')
+        if manifests then
+            for manifestPath in manifests:lines() do
+                local file = io.open(manifestPath, "r")
+                local data = file and file:read("*a")
+                if file then file:close() end
+                local record = data and Json.decode(data)
+                if record and type(record.portId) == "string" and
+                   record.portId:match("^[a-z0-9][a-z0-9_-]*$") then
+                    local script = record.portId .. ".sh"
+                    for _, root in ipairs(record.roots or {}) do
+                        if type(root) == "string" and root:match("%.sh$") then script = root; break end
+                    end
+                    seen[script] = true
+                    table.insert(installedPorts, {
+                        name = record.id or record.portId,
+                        filename = script,
+                        path = basePath,
+                        label = label,
+                        portId = record.portId,
+                        managed = true
+                    })
+                end
+            end
+            manifests:close()
+        end
         local h = io.popen('ls -1 "' .. basePath .. '"/*.sh 2>/dev/null')
         if h then
             for file in h:lines() do
                 local name = file:match("([^/]+)%.sh$")
-                if name then
+                if name and not seen[name .. ".sh"] then
                     table.insert(installedPorts, {
                         name = name,
                         filename = name .. ".sh",
                         path = basePath,
-                        label = label
+                        label = label,
+                        managed = false
                     })
                 end
             end
@@ -186,15 +148,16 @@ end
 
 function startSync()
     catalog = {}
+    catalogAll = {}
     syncStatus = "Sincronizando..."
     download.statusText = "Conectando ao servidor..."
     download.statusColor = {0.55, 0.62, 0.72}
     isOffline = false
     syncing = true
 
-    if SCRIPT_URL == "" then
-        syncStatus = "Sem Script"
-        download.statusText = "Erro: URL do Script nao configurada."
+    if CATALOG_URL == "" then
+        syncStatus = "Sem Catálogo"
+        download.statusText = "Configure KMP/catalog-url.txt."
         download.statusColor = {1.0, 0.3, 0.3}
         isOffline = true
         syncing = false
@@ -206,80 +169,69 @@ function startSync()
 
     local sync_thread = love.thread.newThread([[
         local url, path = ...
-        os.execute(string.format('curl -L -k -s --max-time 20 -A "Mozilla/5.0" "%s" -o "%s"', url, path))
+        local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
+        os.execute('curl -L --fail --silent --show-error --max-time 20 -A "Mozilla/5.0" ' ..
+            quote(url) .. ' -o ' .. quote(path) .. ' 2>/dev/null')
         love.thread.getChannel("sync_done"):push(true)
     ]])
-    sync_thread:start(SCRIPT_URL, savePath)
+    sync_thread:start(CATALOG_URL, savePath)
+end
+
+local function decodeCatalog(content)
+    if type(content) ~= "string" or #content < 5 then return nil, "servidor não retornou dados" end
+    if #content > 1024 * 1024 then return nil, "catálogo excede 1 MB" end
+    local head = content:sub(1, 200):lower()
+    if head:find("<!doctype", 1, true) or head:find("<html", 1, true) then
+        return nil, "servidor devolveu HTML"
+    end
+    local parsed, errorMessage = Json.decode(content)
+    if type(parsed) ~= "table" then return nil, errorMessage or "JSON inválido" end
+    if parsed.error then return nil, "script: " .. tostring(parsed.error):sub(1, 60) end
+    local items, validationError = Catalog.validate(parsed)
+    if not items then return nil, validationError end
+    for _, item in ipairs(items) do
+        item.filename = item.packageFile
+        item.size = item.sizeBytes < 1048576 and
+            string.format("%.1f KB", item.sizeBytes / 1024) or
+            string.format("%.1f MB", item.sizeBytes / 1048576)
+    end
+    return items
+end
+
+local function saveCatalogCache(content)
+    if not love.filesystem.write("catalog-cache.json.tmp", content) then return end
+    local saveDirectory = love.filesystem.getSaveDirectory()
+    os.rename(saveDirectory .. "/catalog-cache.json.tmp", saveDirectory .. "/catalog-cache.json")
 end
 
 function finishSync()
     syncing = false
     local savePath = isWindows() and "kpm_catalog.json" or "/tmp/kpm_catalog.json"
-    
-    local f = io.open(savePath, "r")
-    if not f then
+    local file = io.open(savePath, "r")
+    local content = file and file:read("*a") or nil
+    if file then file:close() end
+    local items, errorMessage = decodeCatalog(content)
+    local fromCache = false
+    if not items then
+        local cached = love.filesystem.read("catalog-cache.json")
+        items = decodeCatalog(cached)
+        fromCache = items ~= nil
+    end
+    if not items then
         syncStatus = "Modo Offline"
-        download.statusText = "Sem Internet ou erro de rede."
+        download.statusText = errorMessage or "Sem Internet ou catálogo válido."
         download.statusColor = {1.0, 0.3, 0.3}
         isOffline = true
         return
     end
-
-    local content = f:read("*a") or ""
-    f:close()
-
-    if #content < 5 then
-        syncStatus = "Erro de Leitura"
-        download.statusText = "Servidor nao retornou dados."
-        download.statusColor = {1.0, 0.3, 0.3}
-        isOffline = true
-        return
-    end
-
-    local head = content:sub(1, 200):lower()
-    if head:match("<!doctype") or head:match("<html") then
-        syncStatus = "Bloqueado"
-        download.statusText = "Servidor devolveu HTML. Verifique o Script."
-        download.statusColor = {1.0, 0.3, 0.3}
-        isOffline = true
-        return
-    end
-
-    local parsed = parse_json(content)
-    if type(parsed) ~= "table" then
-        syncStatus = "Erro no JSON"
-        download.statusText = "Formato de resposta invalido."
-        download.statusColor = {1.0, 0.3, 0.3}
-        isOffline = true
-        return
-    end
-
-    if parsed.error then
-        syncStatus = "Erro no Script"
-        download.statusText = "Script: " .. tostring(parsed.error):sub(1, 60)
-        download.statusColor = {1.0, 0.3, 0.3}
-        isOffline = true
-        return
-    end
-
-    if #parsed == 0 then
-        syncStatus = "Pasta Vazia"
-        download.statusText = "Nenhum arquivo .zip encontrado."
-        download.statusColor = {0.85, 0.7, 0.2}
-        return
-    end
-
-    for _, item in ipairs(parsed) do
-        table.insert(catalog, item)
-    end
-
-    selectedIdx = 1
-    scrollY = 0
+    catalogAll = items
+    applySearch()
+    if not fromCache then saveCatalogCache(content) end
     checkLocalFiles()
-    syncStatus = "Online (" .. #catalog .. " ports)"
-    download.statusText = "Lista sincronizada com sucesso!"
+    syncStatus = (fromCache and "Offline" or "Online") .. " (" .. #catalogAll .. " ports)"
+    download.statusText = fromCache and "Usando catálogo salvo." or "Lista sincronizada com sucesso!"
     download.statusColor = {0.2, 0.85, 0.45}
-    isOffline = false
+    isOffline = fromCache
 end
 
 function love.load()
@@ -297,10 +249,6 @@ function love.load()
         currentSd = 2
     end
 
-    if not isWindows() then
-        os.execute("mkdir -p " .. autoinstallPaths[currentSd])
-    end
-    
     if love.filesystem.getInfo("logo.png") then
         logoImg = love.graphics.newImage("logo.png")
     end
@@ -348,150 +296,173 @@ function love.update(dt)
         end
     end
 
-    if not download.active then return end
+    local torrentEvent = love.thread.getChannel("torrent_event"):pop()
+    if torrentEvent and download.active then
+        if torrentEvent.kind == "progress" then
+            download.phase = "baixando"
+            download.progress = torrentEvent.percent or 0
+            download.speedBps = torrentEvent.speed or 0
+            download.downloadedBytes = torrentEvent.done or 0
+            download.totalBytes = torrentEvent.total or 0
+            download.statusText = torrentEvent.waiting and "Procurando peers..." or
+                string.format("Baixando %s... (%d%%)", download.game.name, download.progress)
+            download.statusColor = {0.0, 0.82, 1.0}
+        elseif torrentEvent.kind == "installing" then
+            download.phase = "extraindo"
+            download.progress = 100
+            download.statusText = "Verificado. Instalando pacote..."
+            download.statusColor = {0.7, 0.4, 1.0}
+        elseif torrentEvent.kind == "done" then
+            download.active = false
+            download.phase = "none"
+            download.progress = 100
+            download.ext_progress = 100
+            download.statusText = "Concluído! " .. download.game.name .. " instalado."
+            download.statusColor = {0.2, 0.85, 0.45}
+            checkLocalFiles()
+            showRestartPopup = true
+            restartPopupTimer = 8
+        elseif torrentEvent.kind == "error" then
+            download.active = false
+            download.phase = "none"
+            download.statusText = "Erro: " .. tostring(torrentEvent.message)
+            download.statusColor = {1.0, 0.3, 0.3}
+        end
+    end
 
-    local status = love.thread.getChannel("dl_status"):pop()
-    if status == "extracting" then
-        download.phase = "extraindo"
-        download.ext_progress = 0
-    elseif status == "done" then
-        download.progress = 100
-        download.ext_progress = 100
-        download.active = false
-        download.phase = "none"
-        download.game.installed = true
-        download.statusText = "Concluido! " .. download.game.name .. " instalado."
-        download.statusColor = {0.2, 0.85, 0.45}
+end
 
-        local p = isWindows() and download.game.filename or (autoinstallPaths[currentSd] .. "/" .. download.game.filename)
-        os.execute('rm -f "' .. p .. '"')
-        checkLocalFiles()
+local function shellQuote(value)
+    return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
 
-        showRestartPopup = true
-        restartPopupTimer = 8
-    elseif status == "error_file" or status == "error_zip" then
-        download.progress = 0
-        download.ext_progress = 0
-        download.active = false
-        download.phase = "none"
-        download.statusText = (status == "error_zip") and "Erro: Arquivo invalido (nao e ZIP)." or "Erro critico de download."
+local function startTorrentDownload(game)
+    local endpoint = os.getenv("KMP_ARIA2_RPC")
+    local secret = os.getenv("KMP_ARIA2_SECRET")
+    local installer = os.getenv("KMP_INSTALLER")
+    if not endpoint or not secret or not installer or isWindows() then
+        download.statusText = "BitTorrent indisponível neste dispositivo."
         download.statusColor = {1.0, 0.3, 0.3}
-        local p = isWindows() and download.game.filename or (autoinstallPaths[currentSd] .. "/" .. download.game.filename)
-        os.execute('rm -f "' .. p .. '"')
+        return
     end
+    local basePorts = sdPaths[currentSd]
+    local directory = basePorts .. "/.kmp/torrents/" .. game.id
+    local df = io.popen("df -Pk " .. shellQuote(basePorts) .. " 2>/dev/null | tail -1")
+    local line = df and df:read("*l") or ""
+    if df then df:close() end
+    local availableKb = tonumber((line or ""):match("^%S+%s+%d+%s+%d+%s+(%d+)"))
+    if not availableKb or availableKb * 1024 < game.sizeBytes * 3 + 64 * 1024 * 1024 then
+        download.statusText = "Espaço insuficiente ou cartão indisponível."
+        download.statusColor = {1.0, 0.3, 0.3}
+        return
+    end
+    if not os.execute("mkdir -p " .. shellQuote(directory)) then
+        download.statusText = "Não foi possível preparar o cartão SD."
+        download.statusColor = {1.0, 0.3, 0.3}
+        return
+    end
+    download.active = true
+    download.phase = "baixando"
+    download.progress = 0
+    download.speedBps = 0
+    download.game = game
+    download.statusText = "Procurando peers..."
+    download.statusColor = {0.0, 0.82, 1.0}
+    while love.thread.getChannel("torrent_cancel"):pop() do end
 
-    if download.phase == "baixando" then
-        local p = isWindows() and download.game.filename or (autoinstallPaths[currentSd] .. "/" .. download.game.filename)
-        local f = io.open(p, "rb")
-        if f then
-            local currentSize = f:seek("end") or 0
-            f:close()
-            
-            local now = love.timer.getTime()
-            if not download.lastT then
-                download.lastT = now
-                download.lastSize = 0
-            end
-            
-            local timeDiff = now - download.lastT
-            if timeDiff >= 0.5 then
-                local bytesDiff = currentSize - (download.lastSize or 0)
-                download.speedBps = bytesDiff / timeDiff
-                download.lastT = now
-                download.lastSize = currentSize
-            end
-
-            local totalSize = download.game.sizeBytes or 1
-            if totalSize > 0 then
-                download.progress = math.min(99, (currentSize / totalSize) * 100)
-            end
-        end
-        download.statusText = string.format("Baixando %s... (%d%%)", download.game.name, math.floor(download.progress))
-        download.statusColor = {0.0, 0.82, 1.0}
-        
-    elseif download.phase == "extraindo" then
-        local p
+    local worker = love.thread.newThread([[
+        local game, basePorts, directory, endpoint, secret, installer = ...
+        require("love.timer")
+        local Json = require("json")
+        local Rpc = require("aria2_rpc")
+        local Torrent = require("torrent")
+        local channel = love.thread.getChannel("torrent_event")
+        local cancel = love.thread.getChannel("torrent_cancel")
+        local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
+        local function fail(message) channel:push({kind = "error", message = message}) end
+        local backend = Torrent.new(Rpc.new(endpoint, secret))
+        local gid, err = backend:start(game, directory)
+        if not gid then fail(err or "aria2c não iniciou o torrent"); return end
+        local lastProgress = 0
+        local lastActivity = love.timer.getTime()
         while true do
-            local next_p = love.thread.getChannel("ext_progress"):pop()
-            if not next_p then break end
-            p = next_p
+            if cancel:pop() then
+                backend:stop(gid)
+                fail("download interrompido; os dados podem ser retomados")
+                return
+            end
+            local state, statusError
+            for attempt = 1, 3 do
+                state, statusError = backend:status(gid, game.infoHash)
+                if state then break end
+                love.timer.sleep(1)
+            end
+            if not state then fail(statusError or "falha de rede"); return end
+            if state.nextGid then
+                gid = state.nextGid
+            elseif state.phase == "error" or state.phase == "removed" then
+                local message = state.errorMessage or "transferência interrompida"
+                if state.errorCode == "9" then message = "sem espaço no cartão SD" end
+                fail(message)
+                return
+            elseif state.phase == "seeding" or state.phase == "complete" then
+                if not state.infoHash then fail("torrent sem infoHash verificado"); return end
+                if type(state.files) ~= "table" or #state.files ~= 1 or
+                   state.files[1].path ~= directory .. "/" .. game.packageFile then
+                    fail("torrent não contém o ZIP esperado")
+                    return
+                end
+                channel:push({kind = "installing"})
+                local itemFile = directory .. "/item.json"
+                local handle = io.open(itemFile, "w")
+                if not handle then fail("não foi possível registrar o pacote"); return end
+                handle:write(Json.encode(game))
+                handle:close()
+                local command = "python3 " .. quote(installer) .. " install " ..
+                    quote(directory .. "/" .. game.packageFile) .. " " ..
+                    quote(basePorts) .. " " .. quote(itemFile) .. " 2>&1"
+                local process = io.popen(command)
+                if not process then fail("instalador indisponível"); return end
+                local output = process:read("*a")
+                local ok = process:close()
+                if not ok then fail((output or "falha na instalação"):sub(1, 160)); return end
+                channel:push({kind = "done"})
+                return
+            else
+                if state.downloadedBytes > lastProgress or state.connections > 0 then
+                    lastProgress = state.downloadedBytes
+                    lastActivity = love.timer.getTime()
+                elseif love.timer.getTime() - lastActivity > 180 then
+                    backend:stop(gid)
+                    fail("nenhum peer disponível por 3 minutos")
+                    return
+                end
+                channel:push({kind = "progress", percent = state.percent,
+                    speed = state.downloadBytesPerSecond, done = state.downloadedBytes,
+                    total = state.totalBytes,
+                    waiting = state.totalBytes == 0 or state.connections == 0})
+            end
+            love.timer.sleep(1)
         end
-        if p then download.ext_progress = p end
-        download.statusText = string.format("Descompactando arquivos... (%d%%)", math.floor(download.ext_progress))
-        download.statusColor = {0.7, 0.4, 1.0} 
-    end
+    ]])
+    worker:start(game, basePorts, directory, endpoint, secret, installer)
+end
+
+function love.threaderror(thread, errorMessage)
+    syncing = false
+    download.active = false
+    download.phase = "none"
+    download.statusText = "Erro interno: " .. tostring(errorMessage):sub(1, 100)
+    download.statusColor = {1.0, 0.3, 0.3}
 end
 
 function startDownload(game)
     if not game or download.active or game.installed then return end
-    download.active = true
-    download.phase = "baixando"
-    download.progress = 0
-    download.ext_progress = 0
-    download.game = game
-    download.lastT = nil
-    download.lastSize = 0
-    download.speedBps = 0
-
-    local path = autoinstallPaths[currentSd] .. "/" .. game.filename
-    if isWindows() then path = game.filename end
-
-    local url = game.downloadUrl
-    if not url or url == "" then
-        url = "https://pixeldrain.com/api/file/" .. game.driveId .. "?download"
-    end
-
-    local basePorts = sdPaths[currentSd]
-    if isWindows() then basePorts = "." end
-
-    local dl_thread = love.thread.newThread([[
-        local url, path, basePorts = ...
-        os.execute(string.format('curl -L -s -k --max-time 7200 -A "Mozilla/5.0" %q -o %q', url, path))
-
-        local f = io.open(path, "rb")
-        if f then
-            local magic = f:read(2) or ""
-            f:close()
-            if magic ~= "PK" then
-                love.thread.getChannel("dl_status"):push("error_zip")
-                return
-            end
-        else
-            love.thread.getChannel("dl_status"):push("error_file")
-            return
-        end
-
-        love.thread.getChannel("dl_status"):push("extracting")
-        local h1 = io.popen(string.format('unzip -l %q | wc -l', path))
-        local total_str = h1:read("*a")
-        h1:close()
-        local total_lines = tonumber(total_str and total_str:match("%d+")) or 100
-        if total_lines < 1 then total_lines = 1 end
-
-        local h2 = io.popen(string.format('cd %q && unzip -o %q 2>&1', basePorts, path))
-        local count = 0
-        local last_pct = -1
-        for line in h2:lines() do
-            count = count + 1
-            local pct = math.floor((count / total_lines) * 100)
-            if pct > 100 then pct = 100 end
-            if pct > last_pct then
-                love.thread.getChannel("ext_progress"):push(pct)
-                last_pct = pct
-            end
-        end
-        h2:close()
-        os.execute(string.format('chmod +x %q/*.sh 2>/dev/null', basePorts))
-        love.thread.getChannel("dl_status"):push("done")
-    ]])
-    dl_thread:start(url, path, basePorts)
+    return startTorrentDownload(game)
 end
 
 local function handleToggleSD()
     currentSd = (currentSd == 1) and 2 or 1
-    if not isWindows() then
-        os.execute("mkdir -p " .. autoinstallPaths[currentSd])
-    end
     checkLocalFiles()
 end
 
@@ -545,7 +516,7 @@ local function handleActionConfirm()
     if download.active or syncing or #catalog == 0 then return end
     local game = catalog[selectedIdx]
     if not game.installed then
-        startDownload(game)
+        showDetails = true
     end
 end
 
@@ -580,10 +551,26 @@ end
 
 local function executeUninstall()
     if gameToUninstall then
-        os.execute(string.format('rm -rf "%s/%s"', gameToUninstall.path, gameToUninstall.name))
-        os.execute(string.format('rm -f "%s/%s"', gameToUninstall.path, gameToUninstall.filename))
-        scanInstalledPorts()
-        checkLocalFiles()
+        if not gameToUninstall.managed then
+            uninstallError = "Port legado sem manifesto: remova manualmente."
+        else
+            local installer = os.getenv("KMP_INSTALLER")
+            if not installer then
+                uninstallError = "Instalador indisponível."
+            else
+                local command = "python3 " .. shellQuote(installer) .. " uninstall " ..
+                    shellQuote(gameToUninstall.path) .. " " .. shellQuote(gameToUninstall.portId) .. " 2>&1"
+                local process = io.popen(command)
+                local output = process and process:read("*a") or "Instalador indisponível"
+                local ok = process and process:close()
+                if ok then
+                    scanInstalledPorts()
+                    checkLocalFiles()
+                else
+                    uninstallError = (output or "Falha na remoção"):sub(1, 100)
+                end
+            end
+        end
         showUninstallPopup = false
         gameToUninstall = nil
     end
@@ -596,6 +583,31 @@ function love.keypressed(key)
         if key == "return" or key == "b" or key == "space" or key == "a" or key == "escape" or key == "x" then
             showRestartPopup = false
             restartPopupTimer = 0
+        end
+        return
+    end
+
+    if showSearch then
+        if key == "left" then searchSelected = math.max(1, searchSelected - 1)
+        elseif key == "right" then searchSelected = math.min(#searchChars, searchSelected + 1)
+        elseif key == "up" then searchSelected = math.max(1, searchSelected - 6)
+        elseif key == "down" then searchSelected = math.min(#searchChars, searchSelected + 6)
+        elseif key == "return" then
+            searchQuery = searchQuery .. searchChars:sub(searchSelected, searchSelected)
+            applySearch()
+        elseif key == "backspace" then
+            searchQuery = searchQuery:sub(1, -2)
+            applySearch()
+        elseif key == "escape" then showSearch = false end
+        return
+    end
+
+    if showDetails then
+        if key == "b" or key == "return" then
+            showDetails = false
+            startDownload(catalog[selectedIdx])
+        elseif key == "a" or key == "space" or key == "escape" or key == "backspace" then
+            showDetails = false
         end
         return
     end
@@ -616,7 +628,11 @@ function love.keypressed(key)
             elseif key == "b" or key == "return" then
                 if #installedPorts > 0 then
                     gameToUninstall = installedPorts[uninstallerSelectedIdx]
-                    showUninstallPopup = true
+                    if gameToUninstall.managed then
+                        showUninstallPopup = true
+                    else
+                        uninstallError = "Port legado sem manifesto: remoção manual."
+                    end
                 end
             elseif key == "a" or key == "space" or key == "escape" or key == "q" or key == "backspace" then
                 appState = "main"
@@ -646,17 +662,20 @@ function love.keypressed(key)
     if showMenu then
         if key == "up" or key == "w" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 3 end
+            if menuSelected < 1 then menuSelected = 4 end
         elseif key == "down" or key == "s" then
             menuSelected = menuSelected + 1
-            if menuSelected > 3 then menuSelected = 1 end
+            if menuSelected > 4 then menuSelected = 1 end
         elseif key == "b" or key == "return" then
             if menuSelected == 1 then handleToggleSD()
-            elseif menuSelected == 2 then 
+            elseif menuSelected == 2 then
+                showMenu = false
+                showSearch = true
+            elseif menuSelected == 3 then
                 showMenu = false
                 scanInstalledPorts()
                 appState = "uninstaller"
-            elseif menuSelected == 3 then
+            elseif menuSelected == 4 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -667,7 +686,14 @@ function love.keypressed(key)
         return
     end
 
-    if download.active or syncing then return end
+    if download.active then
+        if key == "escape" or key == "q" or key == "backspace" then
+            love.thread.getChannel("torrent_cancel"):push(true)
+            download.statusText = "Interrompendo download..."
+        end
+        return
+    end
+    if syncing then return end
 
     if key == "up" or key == "w" then handleNavUp()
     elseif key == "down" or key == "s" then handleNavDown()
@@ -682,6 +708,13 @@ function love.keypressed(key)
     end
 end
 
+function love.textinput(text)
+    if showSearch and text:match("^[%w%s_-]+$") and #searchQuery < 40 then
+        searchQuery = searchQuery .. text
+        applySearch()
+    end
+end
+
 function love.gamepadpressed(joystick, button)
     if appState == "splash" then return end
 
@@ -690,6 +723,29 @@ function love.gamepadpressed(joystick, button)
             showRestartPopup = false
             restartPopupTimer = 0
         end
+        return
+    end
+
+    if showSearch then
+        if button == "dpleft" then searchSelected = math.max(1, searchSelected - 1)
+        elseif button == "dpright" then searchSelected = math.min(#searchChars, searchSelected + 1)
+        elseif button == "dpup" then searchSelected = math.max(1, searchSelected - 6)
+        elseif button == "dpdown" then searchSelected = math.min(#searchChars, searchSelected + 6)
+        elseif button == "b" then
+            searchQuery = searchQuery .. searchChars:sub(searchSelected, searchSelected)
+            applySearch()
+        elseif button == "y" then
+            searchQuery = searchQuery:sub(1, -2)
+            applySearch()
+        elseif button == "a" or button == "back" or button == "start" then showSearch = false end
+        return
+    end
+
+    if showDetails then
+        if button == "b" then
+            showDetails = false
+            startDownload(catalog[selectedIdx])
+        elseif button == "a" or button == "back" or button == "start" then showDetails = false end
         return
     end
 
@@ -709,7 +765,11 @@ function love.gamepadpressed(joystick, button)
             elseif button == "b" then
                 if #installedPorts > 0 then
                     gameToUninstall = installedPorts[uninstallerSelectedIdx]
-                    showUninstallPopup = true
+                    if gameToUninstall.managed then
+                        showUninstallPopup = true
+                    else
+                        uninstallError = "Port legado sem manifesto: remoção manual."
+                    end
                 end
             elseif button == "a" or button == "back" or button == "start" then
                 appState = "main"
@@ -739,17 +799,20 @@ function love.gamepadpressed(joystick, button)
     if showMenu then
         if button == "dpup" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 3 end
+            if menuSelected < 1 then menuSelected = 4 end
         elseif button == "dpdown" then
             menuSelected = menuSelected + 1
-            if menuSelected > 3 then menuSelected = 1 end
+            if menuSelected > 4 then menuSelected = 1 end
         elseif button == "b" then
             if menuSelected == 1 then handleToggleSD()
-            elseif menuSelected == 2 then 
+            elseif menuSelected == 2 then
+                showMenu = false
+                showSearch = true
+            elseif menuSelected == 3 then
                 showMenu = false
                 scanInstalledPorts()
                 appState = "uninstaller"
-            elseif menuSelected == 3 then
+            elseif menuSelected == 4 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -760,7 +823,14 @@ function love.gamepadpressed(joystick, button)
         return
     end
 
-    if download.active or syncing then return end
+    if download.active then
+        if button == "back" or button == "start" then
+            love.thread.getChannel("torrent_cancel"):push(true)
+            download.statusText = "Interrompendo download..."
+        end
+        return
+    end
+    if syncing then return end
 
     if button == "dpup" then handleNavUp()
     elseif button == "dpdown" then handleNavDown()
@@ -776,7 +846,7 @@ function love.gamepadpressed(joystick, button)
 end
 
 function love.gamepadaxis(joystick, axis, value)
-    if appState == "splash" or showRestartPopup or download.active or syncing then return end
+    if appState == "splash" or showRestartPopup or showSearch or showDetails or download.active or syncing then return end
     
     if axis == "lefty" then
         if value < -0.6 then
@@ -787,7 +857,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavUp()
             elseif showMenu then
                 menuSelected = menuSelected - 1
-                if menuSelected < 1 then menuSelected = 3 end
+                if menuSelected < 1 then menuSelected = 4 end
             elseif not showMenu and appState == "main" then 
                 handleNavUp() 
             end
@@ -799,7 +869,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavDown()
             elseif showMenu then
                 menuSelected = menuSelected + 1
-                if menuSelected > 3 then menuSelected = 1 end
+                if menuSelected > 4 then menuSelected = 1 end
             elseif not showMenu and appState == "main" then 
                 handleNavDown() 
             end
@@ -887,7 +957,7 @@ function love.draw()
                     love.graphics.rectangle("fill", 520, y + 25, 80, 18, 4, 4)
                     love.graphics.setColor(0.2, 0.85, 0.45)
                     love.graphics.setFont(fontSub)
-                    love.graphics.printf(port.label, 520, y + 28, 80, "center")
+                    love.graphics.printf(port.managed and port.label or "LEGADO", 520, y + 28, 80, "center")
                 end
             end
         end
@@ -914,6 +984,11 @@ function love.draw()
         love.graphics.setColor(0.40, 0.46, 0.56)
         love.graphics.print("Voltar", 174, 453)
 
+        if uninstallError ~= "" then
+            love.graphics.setColor(1.0, 0.4, 0.4)
+            love.graphics.printf(uninstallError, 24, 425, 590, "left")
+        end
+
         if showUninstallPopup and gameToUninstall then
             love.graphics.setColor(0, 0, 0, 0.85)
             love.graphics.rectangle("fill", 0, 0, 640, 480)
@@ -930,7 +1005,8 @@ function love.draw()
             love.graphics.printf("Apagar " .. gameToUninstall.name .. "?", 120, 215, 400, "center")
             love.graphics.setColor(0.75, 0.82, 0.92)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("Os arquivos serao apagados de " .. gameToUninstall.label .. ".", 120, 245, 400, "center")
+            love.graphics.printf("Os arquivos instalados serao apagados de " .. gameToUninstall.label .. ".",
+                120, 245, 400, "center")
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
             love.graphics.printf("B: Sim (Apagar)    A: Nao (Cancelar)", 120, 280, 400, "center")
@@ -972,7 +1048,11 @@ function love.draw()
         if #catalog == 0 then
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontItem)
-            if isOffline then
+            if #catalogAll > 0 then
+                love.graphics.printf("Nenhum resultado para: " .. searchQuery, 0, 190, 640, "center")
+            elseif syncStatus:find("(0 ports)", 1, true) then
+                love.graphics.printf("Nenhum homebrew no catálogo.", 0, 190, 640, "center")
+            elseif isOffline then
                 love.graphics.printf("Conexao ou leitura falhou.", 0, 190, 640, "center")
                 love.graphics.setFont(fontSub)
                 love.graphics.setColor(1.0, 0.4, 0.4)
@@ -1057,7 +1137,7 @@ function love.draw()
             if download.phase == "baixando" then
                 love.graphics.printf("BAIXANDO PORT...", 120, 170, 400, "center")
             elseif download.phase == "extraindo" then
-                love.graphics.printf("DESCOMPACTANDO...", 120, 170, 400, "center")
+                love.graphics.printf("VALIDANDO E INSTALANDO...", 120, 170, 400, "center")
             end
 
             love.graphics.setColor(0.75, 0.82, 0.92)
@@ -1073,7 +1153,7 @@ function love.draw()
                 love.graphics.rectangle("fill", 150, 245, 340 * (download.progress / 100), 16, 8, 8)
             elseif download.phase == "extraindo" then
                 love.graphics.setColor(0.7, 0.4, 1.0)
-                love.graphics.rectangle("fill", 150, 245, 340 * (download.ext_progress / 100), 16, 8, 8)
+                love.graphics.rectangle("fill", 150, 245, 340, 16, 8, 8)
             end
 
             love.graphics.setColor(0.96, 0.97, 1.0)
@@ -1089,9 +1169,15 @@ function love.draw()
                         speedStr = string.format("%.1f KB/s", download.speedBps / 1024)
                     end
                 end
-                infoText = string.format("Progresso: %d%%   |   Velocidade: %s", math.floor(download.progress), speedStr)
+                if download.game and download.game.magnet then
+                    infoText = string.format("%d%%   |   %.1f / %.1f MB   |   %s",
+                        math.floor(download.progress), (download.downloadedBytes or 0) / 1048576,
+                        (download.totalBytes or 0) / 1048576, speedStr)
+                else
+                    infoText = string.format("Progresso: %d%%   |   Velocidade: %s", math.floor(download.progress), speedStr)
+                end
             else
-                infoText = string.format("Progresso: %d%%", math.floor(download.ext_progress))
+                infoText = "Download verificado; preparando instalação."
             end
 
             love.graphics.printf(infoText, 120, 280, 400, "center")
@@ -1113,13 +1199,13 @@ function love.draw()
         love.graphics.setFont(fontSub)
         love.graphics.setColor(0.40, 0.46, 0.56)
         
-        -- INSTALAR (B)
+        -- DETALHES (B)
         love.graphics.setColor(0.35, 0.3, 0.1)
         love.graphics.rectangle("fill", 24, 452, 18, 18, 4, 4)
         love.graphics.setColor(0.95, 0.85, 0.2)
         love.graphics.printf("B", 24, 455, 18, "center")
         love.graphics.setColor(0.40, 0.46, 0.56)
-        love.graphics.print("Instalar", 47, 455)
+        love.graphics.print("Detalhes", 47, 455)
 
         -- ATUALIZAR LISTA (Y - Verde clássico do console)
         love.graphics.setColor(0.15, 0.35, 0.2)
@@ -1152,20 +1238,20 @@ function love.draw()
             love.graphics.rectangle("fill", 0, 0, 640, 480)
 
             love.graphics.setColor(0.1, 0.15, 0.22, 0.98)
-            love.graphics.rectangle("fill", 170, 120, 300, 240, 12, 12)
+            love.graphics.rectangle("fill", 170, 95, 300, 290, 12, 12)
 
             love.graphics.setColor(0.0, 0.82, 1.0, 0.6)
             love.graphics.setLineWidth(2)
-            love.graphics.rectangle("line", 170, 120, 300, 240, 12, 12)
+            love.graphics.rectangle("line", 170, 95, 300, 290, 12, 12)
 
             love.graphics.setColor(0.96, 0.97, 1.0)
             love.graphics.setFont(fontTitle)
-            love.graphics.printf("MENU DE OPCOES", 170, 135, 300, "center")
+            love.graphics.printf("MENU DE OPCOES", 170, 110, 300, "center")
 
             love.graphics.setColor(1, 1, 1, 0.1)
-            love.graphics.line(190, 165, 450, 165)
+            love.graphics.line(190, 140, 450, 140)
 
-            local opt1_y = 185
+            local opt1_y = 160
             if menuSelected == 1 then
                 love.graphics.setColor(0.0, 0.82, 1.0, 0.2)
                 love.graphics.rectangle("fill", 190, opt1_y - 6, 260, 36, 6, 6)
@@ -1176,7 +1262,7 @@ function love.draw()
             love.graphics.setFont(fontItem)
             love.graphics.printf("Mudar Destino: " .. sdLabels[currentSd], 170, opt1_y, 300, "center")
 
-            local opt2_y = 235
+            local opt2_y = 210
             if menuSelected == 2 then
                 love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
                 love.graphics.rectangle("fill", 190, opt2_y - 6, 260, 36, 6, 6)
@@ -1184,9 +1270,9 @@ function love.draw()
                 love.graphics.rectangle("line", 190, opt2_y - 6, 260, 36, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Desinstalador de Ports", 170, opt2_y, 300, "center")
+            love.graphics.printf("Pesquisar por nome", 170, opt2_y, 300, "center")
 
-            local opt3_y = 285
+            local opt3_y = 260
             if menuSelected == 3 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt3_y - 6, 260, 36, 6, 6)
@@ -1194,11 +1280,69 @@ function love.draw()
                 love.graphics.rectangle("line", 190, opt3_y - 6, 260, 36, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Sair", 170, opt3_y, 300, "center")
+            love.graphics.printf("Desinstalador de Ports", 170, opt3_y, 300, "center")
+
+            local opt4_y = 310
+            if menuSelected == 4 then
+                love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
+                love.graphics.rectangle("fill", 190, opt4_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(0.85, 0.65, 0.2)
+                love.graphics.rectangle("line", 190, opt4_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1, 1, 1)
+            else love.graphics.setColor(0.6, 0.65, 0.75) end
+            love.graphics.printf("Sair", 170, opt4_y, 300, "center")
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("B: Confirmar   A: Voltar", 170, 330, 300, "center")
+            love.graphics.printf("B: Confirmar   A: Voltar", 170, 360, 300, "center")
+        end
+
+        if showSearch then
+            love.graphics.setColor(0, 0, 0, 0.88)
+            love.graphics.rectangle("fill", 0, 0, 640, 480)
+            love.graphics.setColor(0.1, 0.15, 0.22)
+            love.graphics.rectangle("fill", 105, 42, 430, 395, 12, 12)
+            love.graphics.setColor(0.0, 0.82, 1.0)
+            love.graphics.setFont(fontTitle)
+            love.graphics.printf("PESQUISAR HOME BREWS", 105, 60, 430, "center")
+            love.graphics.setFont(fontItem)
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.printf(searchQuery == "" and "(todos)" or searchQuery, 125, 102, 390, "center")
+            for i = 1, #searchChars do
+                local column = (i - 1) % 6
+                local row = math.floor((i - 1) / 6)
+                local x, y = 150 + column * 58, 145 + row * 42
+                love.graphics.setColor(i == searchSelected and 0.0 or 0.2,
+                    i == searchSelected and 0.65 or 0.25,
+                    i == searchSelected and 0.9 or 0.35)
+                love.graphics.rectangle("fill", x, y, 42, 34, 5, 5)
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.printf(searchChars:sub(i, i), x, y + 6, 42, "center")
+            end
+            love.graphics.setFont(fontSub)
+            love.graphics.setColor(0.7, 0.8, 0.9)
+            love.graphics.printf("B: letra   Y: apagar   A: voltar", 105, 410, 430, "center")
+        end
+
+        if showDetails and catalog[selectedIdx] then
+            local game = catalog[selectedIdx]
+            love.graphics.setColor(0, 0, 0, 0.88)
+            love.graphics.rectangle("fill", 0, 0, 640, 480)
+            love.graphics.setColor(0.1, 0.15, 0.22)
+            love.graphics.rectangle("fill", 90, 100, 460, 280, 12, 12)
+            love.graphics.setColor(0.0, 0.82, 1.0)
+            love.graphics.setFont(fontTitle)
+            love.graphics.printf(game.name, 110, 120, 420, "center")
+            love.graphics.setColor(0.85, 0.9, 0.95)
+            love.graphics.setFont(fontSub)
+            love.graphics.printf("Versão: " .. (game.version or "-") .. "   |   Licença: " .. (game.license or "-") ..
+                "   |   Tamanho: " .. (game.size or "-"), 110, 165, 420, "center")
+            love.graphics.setFont(fontItem)
+            love.graphics.printf(game.description or "Sem descrição", 115, 205, 410, "center")
+            love.graphics.setFont(fontSub)
+            love.graphics.setColor(0.5, 0.6, 0.7)
+            love.graphics.printf("Destino: " .. sdLabels[currentSd], 110, 315, 420, "center")
+            love.graphics.printf("B: instalar   A: voltar", 110, 345, 420, "center")
         end
 
         if appState == "power_menu" then

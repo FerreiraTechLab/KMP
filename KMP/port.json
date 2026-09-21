@@ -11,18 +11,17 @@
         "porter": [
             "Kaiaum"
         ],
-        "desc": "Baixador de arquivos zip, diretamente de repositorios publicos da internet",
-        "inst": "Ready to run.",
+        "desc": "Catálogo e instalador de homebrews redistribuíveis por BitTorrent",
+        "inst": "Instale aria2 no DarkOS. O catálogo demo está incluído; para outros conteúdos configure KMP/catalog-url.txt.",
         "genres": [
             "other"
         ],
         "image": {},
-        "rtr": true,
+        "rtr": false,
         "runtime": [],
         "reqs": [],
         "arch": [
-            "aarch64",
-            "armhf"
+            "aarch64"
         ]
     }
 }

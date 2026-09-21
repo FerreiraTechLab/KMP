@@ -3,7 +3,7 @@
   <game>
     <path>./KMP.sh</path>
     <name>KMP</name>
-    <desc>Baixador de arquivos zip que tem a funcao de baixar jogos de fontes externas da internet.</desc>
+    <desc>Catálogo de homebrews redistribuíveis com instalação por BitTorrent.</desc>
     <image>./KMP/logo.png</image>
     <releasedate>20260912T000000</releasedate>
     <developer>Kaiaum</developer>

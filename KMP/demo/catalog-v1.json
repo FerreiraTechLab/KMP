@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "kmp-demo",
+      "name": "KMP Demo",
+      "version": "1.0",
+      "description": "Pacote pequeno para testar o fluxo BitTorrent",
+      "sizeBytes": 518,
+      "license": "CC0-1.0",
+      "infoHash": "54eee30a61860eb4466e2e78c9fa8c52aaade089",
+      "magnet": "magnet:?xt=urn:btih:54eee30a61860eb4466e2e78c9fa8c52aaade089&dn=kmp-demo.zip",
+      "packageFile": "kmp-demo.zip",
+      "install": {
+        "portId": "kmp-demo",
+        "paths": [
+          "kmp-demo.sh",
+          "kmp-demo/"
+        ]
+      }
+    }
+  ]
+}
