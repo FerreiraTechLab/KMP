@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<gameList>
+  <game>
+    <path>./KMP.sh</path>
+    <name>KMP</name>
+    <desc>Baixador de arquivos zip que tem a funcao de baixar jogos de fontes externas da internet.</desc>
+    <image>./KMP/logo.png</image>
+    <releasedate>20260912T000000</releasedate>
+    <developer>Kaiaum</developer>
+    <publisher>Kaiaum</publisher>
+    <genre>Other</genre>
+  </game>
+</gameList>

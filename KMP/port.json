@@ -1,0 +1,28 @@
+{
+    "version": 2,
+    "name": "KMP.zip",
+    "items": [
+        "KMP.sh",
+        "KMP"
+    ],
+    "items_opt": null,
+    "attr": {
+        "title": "KMP",
+        "porter": [
+            "Kaiaum"
+        ],
+        "desc": "Baixador de arquivos zip, diretamente de repositorios publicos da internet",
+        "inst": "Ready to run.",
+        "genres": [
+            "other"
+        ],
+        "image": {},
+        "rtr": true,
+        "runtime": [],
+        "reqs": [],
+        "arch": [
+            "aarch64",
+            "armhf"
+        ]
+    }
+}
