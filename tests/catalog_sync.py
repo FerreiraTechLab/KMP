@@ -126,6 +126,22 @@ class CatalogSyncTest(unittest.TestCase):
         with self.assertRaisesRegex(SYNC.VerificationError, "nome inesperado"):
             SYNC.download_snapshot(head, directory, rpc, sleep=lambda _: None)
 
+    def test_sync_reuses_verified_download_without_rpc(self):
+        release = self.release("cached", 8)
+        sources = self.root / "sources.txt"
+        sources.write_text(release.as_uri() + "/\n")
+        downloads = self.root / "downloads"
+        downloads.mkdir()
+        cached = downloads / "catalog-00000008.json"
+        cached.write_bytes((release / cached.name).read_bytes())
+        result = SYNC.sync_catalog(
+            sources, self.public_key, self.root / "state.json",
+            self.root / "pending", downloads, self.root / "active.json",
+            "invalid-rpc-that-must-not-be-used", "invalid-secret",
+        )
+        self.assertEqual(result["sequence"], 8)
+        self.assertEqual(json.loads((self.root / "active.json").read_text())["sequence"], 8)
+
     def test_status_reports_trust_without_private_key(self):
         release = self.release("status", 8)
         sources = self.root / "sources.txt"

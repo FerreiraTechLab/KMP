@@ -62,6 +62,7 @@ local fontTitle, fontItem, fontSub, fontSmall
 local syncStatus = "Conectando..."
 local isOffline = true
 local syncing = false
+local syncStartedAt = 0
 
 local download = {
     active = false,
@@ -166,6 +167,7 @@ function startSync()
     download.statusColor = {0.55, 0.62, 0.72}
     isOffline = false
     syncing = true
+    syncStartedAt = love.timer.getTime()
 
     local distributed = CATALOG_SYNC ~= "" and CATALOG_SOURCES ~= "" and
         CATALOG_PUBLIC_KEY ~= "" and CATALOG_ACTIVE ~= "" and
@@ -316,6 +318,8 @@ function love.update(dt)
             local syncEvent = love.thread.getChannel("sync_done"):pop()
             if syncEvent then
                 finishSync(syncEvent)
+            elseif love.timer.getTime() - syncStartedAt >= 12 and CATALOG_ACTIVE ~= "" then
+                finishSync({distributed = true, ok = false})
             end
         else
             if splashTimer >= 2.0 then

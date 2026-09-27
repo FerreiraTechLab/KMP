@@ -235,7 +235,12 @@ def sync_catalog(sources_path: Path, public_key: Path, state_path: Path,
     discovered = discover(read_sources(sources_path), public_key, state_path, pending_dir)
     head = load_verified_head(pending_dir / "head.json", pending_dir / "head.json.sig",
                               public_key)
-    catalog_path = download_snapshot(head, download_dir, rpc_client(endpoint, secret))
+    cached_path = download_dir / f"catalog-{head['sequence']:08d}.json"
+    try:
+        verify_catalog(cached_path, head, public_key)
+        catalog_path = cached_path
+    except VerificationError:
+        catalog_path = download_snapshot(head, download_dir, rpc_client(endpoint, secret))
     activated = activate(pending_dir / "head.json", pending_dir / "head.json.sig",
                          catalog_path, public_key, state_path, active_path)
     return {**discovered, **activated}

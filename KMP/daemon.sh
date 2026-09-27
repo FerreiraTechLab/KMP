@@ -12,6 +12,8 @@ env_file="$state_dir/rpc.env"
 session_file="$state_dir/session.txt"
 log_file="$state_dir/aria2.log"
 settings_file="$state_dir/settings.conf"
+version_file="$state_dir/daemon.version"
+daemon_version=2
 
 valid_pid() {
   [ -f "$pid_file" ] || return 1
@@ -48,8 +50,15 @@ case "$command_name" in
     touch "$session_file"
     chmod 600 "$session_file"
     if valid_pid; then
-      cat "$env_file"
-      exit 0
+      if [ "$(cat "$version_file" 2>/dev/null)" = "$daemon_version" ]; then
+        cat "$env_file"
+        exit 0
+      fi
+      kill "$daemon_pid" 2>/dev/null || true
+      for _attempt in 1 2 3 4 5; do
+        kill -0 "$daemon_pid" 2>/dev/null || break
+        sleep 1
+      done
     fi
     rm -f "$pid_file" "$env_file"
     if [ ! -x "$aria2_binary" ] && ! command -v "$aria2_binary" >/dev/null 2>&1; then
@@ -82,13 +91,14 @@ case "$command_name" in
       --enable-dht=true --enable-peer-exchange=true --bt-enable-lpd=true \
       --listen-port="$listen_port" --dht-listen-port="$listen_port" \
       --seed-ratio=0 --max-overall-upload-limit="$upload_limit" \
-      --max-concurrent-downloads=2 --dir="$download_dir" \
+      --max-concurrent-downloads=5 --dir="$download_dir" \
       --console-log-level=warn < /dev/null >> "$log_file" 2>&1 &
     daemon_pid=$!
     printf '%s\n' "$daemon_pid" > "$pid_file"
     sleep 1
     for _attempt in 1 2 3 4 5; do
       if valid_pid; then
+        printf '%s\n' "$daemon_version" > "$version_file"
         cat "$env_file"
         exit 0
       fi
