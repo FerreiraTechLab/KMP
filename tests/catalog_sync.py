@@ -30,16 +30,19 @@ class CatalogSyncTest(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def release(self, name, sequence, marker=""):
+    def release(self, name, sequence, marker="", private_key=None, next_public_key=None):
         source = self.root / f"{name}.json"
         source.write_text(json.dumps({"schemaVersion": 2, "sequence": sequence,
             "generatedAt": "2026-09-26T23:00:00Z", "items": [], "marker": marker},
             separators=(",", ":")) + "\n")
         output = self.root / name
-        subprocess.run(["python3", str(ROOT / "tools/catalog-release.py"), str(source),
-            "--private-key", str(self.private_key), "--magnet",
+        command = ["python3", str(ROOT / "tools/catalog-release.py"), str(source),
+            "--private-key", str(private_key or self.private_key), "--magnet",
             "magnet:?xt=urn:btih:" + ("a" if sequence == 7 else "b") * 40,
-            "--output", str(output)], check=True, stdout=subprocess.DEVNULL)
+            "--output", str(output)]
+        if next_public_key is not None:
+            command.extend(["--next-public-key", str(next_public_key)])
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
         return output
 
     def test_discovers_highest_valid_mirror_and_activates(self):
@@ -159,6 +162,27 @@ class CatalogSyncTest(unittest.TestCase):
         self.assertEqual(status["sequence"], 8)
         self.assertEqual(status["mirrors"], 2)
         self.assertRegex(status["fingerprint"], r"^[0-9A-F]{4}(?::[0-9A-F]{4}){7}$")
+
+    def test_rotates_key_only_after_catalog_activation(self):
+        next_private = self.root / "next-private.pem"
+        next_public = self.root / "next-public.pem"
+        subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out",
+                        str(next_private)], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["openssl", "pkey", "-in", str(next_private), "-pubout", "-out",
+                        str(next_public)], check=True, stdout=subprocess.DEVNULL)
+        trusted_key = self.root / "trusted.pem"
+        trusted_key.write_bytes(self.public_key.read_bytes())
+        release = self.release("rotation", 8, next_public_key=next_public)
+        state = self.root / "state.json"
+        activated = SYNC.activate(release / "head.json", release / "head.json.sig",
+            release / "catalog-00000008.json", trusted_key, state, self.root / "active.json")
+        self.assertTrue(activated["keyRotated"])
+        self.assertEqual(SYNC.public_key_fingerprint(trusted_key),
+                         SYNC.public_key_fingerprint(next_public))
+        following = self.release("following", 9, private_key=next_private)
+        result = SYNC.discover([following.as_uri() + "/"], trusted_key, state,
+                               self.root / "pending-next")
+        self.assertEqual(result["sequence"], 9)
 
 
 if __name__ == "__main__":

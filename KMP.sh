@@ -45,8 +45,13 @@ for recovery_root in /roms/ports /roms2/ports; do
   fi
 done
 if [ -f "$GAMEDIR/catalog-sources.txt" ] && [ -f "$GAMEDIR/catalog-root.pub" ]; then
+  trusted_catalog_key="$CONFDIR/catalog/trusted-key.pem"
+  if [ ! -s "$trusted_catalog_key" ]; then
+    mkdir -p "$CONFDIR/catalog"
+    install -m 600 "$GAMEDIR/catalog-root.pub" "$trusted_catalog_key"
+  fi
   export KMP_CATALOG_SOURCES="$GAMEDIR/catalog-sources.txt"
-  export KMP_CATALOG_PUBLIC_KEY="$GAMEDIR/catalog-root.pub"
+  export KMP_CATALOG_PUBLIC_KEY="$trusted_catalog_key"
   export KMP_CATALOG_STATE="$CONFDIR/catalog/state.json"
   export KMP_CATALOG_PENDING="$CONFDIR/catalog/pending"
   export KMP_CATALOG_DOWNLOADS="$CONFDIR/catalog/torrents"

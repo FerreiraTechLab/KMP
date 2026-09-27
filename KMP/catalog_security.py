@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 MAX_HEAD_BYTES = 32 * 1024
 MAX_CATALOG_BYTES = 8 * 1024 * 1024
+MAX_PUBLIC_KEY_BYTES = 4096
 HEX64 = set("0123456789abcdef")
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 INFO_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -25,6 +26,25 @@ INFO_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
 
 class VerificationError(ValueError):
     pass
+
+
+def public_key_fingerprint(public_key: Path) -> str:
+    result = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", str(public_key), "-outform", "DER"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise VerificationError("chave pública inválida")
+    return hashlib.sha256(result.stdout).hexdigest()
+
+
+def validate_public_key(data: bytes) -> str:
+    if not 1 <= len(data) <= MAX_PUBLIC_KEY_BYTES:
+        raise VerificationError("nova chave pública inválida")
+    with tempfile.TemporaryDirectory(prefix="kmp-key-") as temporary:
+        path = Path(temporary, "public.pem")
+        path.write_bytes(data)
+        return public_key_fingerprint(path)
 
 
 def _read_limited(path: Path, limit: int) -> bytes:
@@ -100,6 +120,21 @@ def validate_head(document: object, now: datetime | None = None) -> dict:
             raise VerificationError("torrent do catálogo inválido") from exc
         if not 1 <= len(torrent) <= 16384:
             raise VerificationError("torrent do catálogo inválido")
+    rotation = document.get("nextKey")
+    if rotation is not None:
+        if not isinstance(rotation, dict) or rotation.get("effectiveAfterSequence") != sequence:
+            raise VerificationError("rotação de chave inválida")
+        encoded_key = rotation.get("publicKey")
+        fingerprint = rotation.get("sha256")
+        if not isinstance(encoded_key, str) or not isinstance(fingerprint, str) or \
+                len(fingerprint) != 64 or any(c not in HEX64 for c in fingerprint):
+            raise VerificationError("rotação de chave inválida")
+        try:
+            key_data = base64.b64decode(encoded_key, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise VerificationError("rotação de chave inválida") from exc
+        if validate_public_key(key_data) != fingerprint:
+            raise VerificationError("fingerprint da nova chave não confere")
     published = parse_time(document.get("publishedAt"), "publishedAt")
     expires = parse_time(document.get("expiresAt"), "expiresAt")
     now = now or datetime.now(timezone.utc)
@@ -209,24 +244,49 @@ def verify_catalog(catalog_path: Path, head: dict, public_key: Path) -> bytes:
     return raw
 
 
+def load_state(state_path: Path) -> dict:
+    if not state_path.exists():
+        return {"highestSequence": 0}
+    try:
+        state = json.loads(_read_limited(state_path, 4096))
+    except (VerificationError, TypeError, json.JSONDecodeError) as exc:
+        raise VerificationError("estado de sequência inválido") from exc
+    previous = state.get("highestSequence")
+    if not isinstance(previous, int) or isinstance(previous, bool) or previous < 0:
+        raise VerificationError("estado de sequência inválido")
+    return state
+
+
 def enforce_monotonic(sequence: int, state_path: Path) -> None:
-    previous = 0
-    if state_path.exists():
-        try:
-            state = json.loads(_read_limited(state_path, 4096))
-            previous = state["highestSequence"]
-        except (VerificationError, KeyError, TypeError, json.JSONDecodeError) as exc:
-            raise VerificationError("estado de sequência inválido") from exc
-        if not isinstance(previous, int) or isinstance(previous, bool) or previous < 0:
-            raise VerificationError("estado de sequência inválido")
+    previous = load_state(state_path)["highestSequence"]
     if sequence < previous:
         raise VerificationError("catálogo rejeitado por proteção contra downgrade")
 
 
-def save_sequence(sequence: int, state_path: Path) -> None:
+def validate_clock(now: datetime, state_path: Path) -> None:
+    state = load_state(state_path)
+    last_time = state.get("lastTrustedTime")
+    if last_time is not None:
+        trusted = parse_time(last_time, "lastTrustedTime")
+        if now < trusted - timedelta(minutes=10):
+            raise VerificationError("relógio local inválido ou atrasado")
+
+
+def save_sequence(sequence: int, state_path: Path, trusted_time: datetime | None = None,
+                  key_fingerprint: str | None = None) -> None:
+    state = load_state(state_path)
+    state["highestSequence"] = max(sequence, state["highestSequence"])
+    if trusted_time is not None:
+        previous = state.get("lastTrustedTime")
+        previous_time = parse_time(previous, "lastTrustedTime") if previous else None
+        if previous_time is None or trusted_time > previous_time:
+            state["lastTrustedTime"] = trusted_time.astimezone(timezone.utc).isoformat(
+                timespec="seconds").replace("+00:00", "Z")
+    if key_fingerprint is not None:
+        state["trustedKeySha256"] = key_fingerprint
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = state_path.with_name(state_path.name + ".tmp")
-    temporary.write_text(json.dumps({"highestSequence": sequence}) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temporary, state_path)
 
 

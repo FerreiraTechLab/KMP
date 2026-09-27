@@ -97,6 +97,32 @@ class CatalogSecurityTest(unittest.TestCase):
         with self.assertRaisesRegex(SECURITY.VerificationError, "id inválido"):
             SECURITY.validate_catalog_document(invalid, 1)
 
+    def test_authorized_next_key_is_validated(self):
+        next_private = self.root / "next-private.pem"
+        next_public = self.root / "next-public.pem"
+        subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out",
+                        str(next_private)], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["openssl", "pkey", "-in", str(next_private), "-pubout", "-out",
+                        str(next_public)], check=True, stdout=subprocess.DEVNULL)
+        rotated = self.root / "rotated"
+        subprocess.run([
+            "python3", str(ROOT / "tools/catalog-release.py"), str(self.catalog),
+            "--private-key", str(self.private_key), "--next-public-key", str(next_public),
+            "--magnet", "magnet:?xt=urn:btih:" + "a" * 40, "--output", str(rotated),
+        ], check=True, stdout=subprocess.DEVNULL)
+        head = SECURITY.load_verified_head(rotated / "head.json", rotated / "head.json.sig",
+                                           self.public_key)
+        self.assertEqual(head["nextKey"]["effectiveAfterSequence"], 7)
+        self.assertEqual(head["nextKey"]["sha256"],
+                         SECURITY.public_key_fingerprint(next_public))
+
+    def test_regressed_clock_is_rejected(self):
+        state = self.root / "state.json"
+        trusted = datetime(2027, 1, 2, tzinfo=timezone.utc)
+        SECURITY.save_sequence(7, state, trusted)
+        with self.assertRaisesRegex(SECURITY.VerificationError, "relógio"):
+            SECURITY.validate_clock(trusted - timedelta(days=1), state)
+
 
 if __name__ == "__main__":
     unittest.main()

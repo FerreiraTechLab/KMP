@@ -41,10 +41,10 @@ estado parcial silencioso.
 
 ### P0 — confiança e recuperação
 
-- [ ] Definir e implementar rotação de chave autorizada pela chave atual.
-- [ ] Definir recuperação após comprometimento ou perda da chave.
-- [ ] Documentar armazenamento e backup offline da chave editorial.
-- [ ] Tratar relógio incorreto sem aceitar heads expirados silenciosamente.
+- [x] Definir e implementar rotação de chave autorizada pela chave atual.
+- [x] Definir recuperação após comprometimento ou perda da chave.
+- [x] Documentar armazenamento e backup offline da chave editorial.
+- [x] Tratar relógio incorreto sem aceitar heads expirados silenciosamente.
 
 Critério de conclusão: o cliente consegue distinguir atualização normal,
 rotação autorizada, catálogo expirado e relógio inválido, mantendo o último

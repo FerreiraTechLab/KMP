@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,7 +13,7 @@ import sys
 import tempfile
 import time
 import re
-import subprocess
+from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
@@ -25,7 +24,9 @@ from catalog_security import (
     VerificationError,
     enforce_monotonic,
     load_verified_head,
+    public_key_fingerprint,
     save_sequence,
+    validate_clock,
     verify_catalog,
 )
 
@@ -109,6 +110,7 @@ def verify_candidate(head_bytes: bytes, signature: bytes, public_key: Path,
 
 def discover(sources: list[str], public_key: Path, state_path: Path,
              pending_dir: Path) -> dict:
+    validate_clock(datetime.now(timezone.utc), state_path)
     candidates = []
     errors = []
     with tempfile.TemporaryDirectory(prefix="kmp-heads-") as directory:
@@ -140,12 +142,23 @@ def discover(sources: list[str], public_key: Path, state_path: Path,
 
 def activate(head_path: Path, signature_path: Path, catalog_path: Path,
              public_key: Path, state_path: Path, active_path: Path) -> dict:
+    now = datetime.now(timezone.utc)
+    validate_clock(now, state_path)
     head = load_verified_head(head_path, signature_path, public_key)
     enforce_monotonic(head["sequence"], state_path)
     raw = verify_catalog(catalog_path, head, public_key)
     atomic_write(active_path, raw)
-    save_sequence(head["sequence"], state_path)
-    return {"sequence": head["sequence"], "catalog": str(active_path)}
+    fingerprint = public_key_fingerprint(public_key)
+    rotated = False
+    rotation = head.get("nextKey")
+    if rotation is not None:
+        key_data = base64.b64decode(rotation["publicKey"], validate=True)
+        atomic_write(public_key, key_data, 0o600)
+        fingerprint = rotation["sha256"]
+        rotated = True
+    save_sequence(head["sequence"], state_path, now, fingerprint)
+    return {"sequence": head["sequence"], "catalog": str(active_path),
+            "keyRotated": rotated}
 
 
 def rpc_client(endpoint: str, secret: str):
@@ -255,13 +268,7 @@ def catalogue_status(sources_path: Path, public_key: Path, state_path: Path,
         return result
     result["configured"] = True
     result["mirrors"] = len(read_sources(sources_path))
-    key_result = subprocess.run(
-        ["openssl", "pkey", "-pubin", "-in", str(public_key), "-outform", "DER"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
-    )
-    if key_result.returncode != 0 or not key_result.stdout:
-        raise VerificationError("chave pública inválida")
-    digest = hashlib.sha256(key_result.stdout).hexdigest().upper()
+    digest = public_key_fingerprint(public_key).upper()
     result["fingerprint"] = ":".join(digest[index:index + 4]
                                       for index in range(0, 32, 4))
     if state_path.is_file():
@@ -275,10 +282,16 @@ def catalogue_status(sources_path: Path, public_key: Path, state_path: Path,
     head_path = pending_dir / "head.json"
     signature_path = pending_dir / "head.json.sig"
     if head_path.is_file() and signature_path.is_file():
-        head = load_verified_head(head_path, signature_path, public_key)
-        result["verified"] = True
-        result["sequence"] = max(result["sequence"], head["sequence"])
-        result["expiresAt"] = head["expiresAt"]
+        try:
+            validate_clock(datetime.now(timezone.utc), state_path)
+            head = load_verified_head(head_path, signature_path, public_key)
+            result["verified"] = True
+            result["sequence"] = max(result["sequence"], head["sequence"])
+            result["expiresAt"] = head["expiresAt"]
+        except VerificationError:
+            # A cached head signed by the previous key is expected immediately
+            # after rotation. The active snapshot remains available.
+            pass
     return result
 
 

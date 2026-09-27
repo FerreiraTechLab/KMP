@@ -36,6 +36,8 @@ def main() -> int:
     parser.add_argument("--magnet", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--valid-days", type=int, default=30)
+    parser.add_argument("--next-public-key", type=Path,
+                        help="autoriza esta chave para assinar o próximo head")
     args = parser.parse_args()
 
     raw = args.catalog.read_bytes()
@@ -78,6 +80,22 @@ def main() -> int:
     }
     if torrent is not None:
         head["catalogTorrent"] = base64.b64encode(torrent).decode("ascii")
+    if args.next_public_key is not None:
+        if not args.next_public_key.is_file() or not 1 <= args.next_public_key.stat().st_size <= 4096:
+            parser.error("nova chave pública ausente ou grande demais")
+        key_data = args.next_public_key.read_bytes()
+        result = subprocess.run(
+            ["openssl", "pkey", "-pubin", "-in", str(args.next_public_key),
+             "-outform", "DER"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if result.returncode != 0 or not result.stdout:
+            parser.error("nova chave pública inválida")
+        head["nextKey"] = {
+            "effectiveAfterSequence": sequence,
+            "publicKey": base64.b64encode(key_data).decode("ascii"),
+            "sha256": hashlib.sha256(result.stdout).hexdigest(),
+        }
     head_path = args.output / "head.json"
     head_path.write_text(json.dumps(head, ensure_ascii=False, sort_keys=True,
                                     separators=(",", ":")) + "\n", encoding="utf-8")
