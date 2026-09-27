@@ -46,6 +46,25 @@ class RpcHttpTest(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_empty_array_parameter(self):
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            env = os.environ.copy()
+            env["KMP_TEST_RPC_URL"] = f"http://127.0.0.1:{server.server_port}/jsonrpc"
+            code = (
+                "package.path='KMP/game/?.lua;'..package.path; "
+                "local Json=require('json'); "
+                "local call=require('aria2_rpc').new(os.getenv('KMP_TEST_RPC_URL'), 'abc123'); "
+                "assert(call('aria2.addTorrent', {'ZDQ6aW5mb2Rl', Json.array(), {dir='/tmp'}}))"
+            )
+            subprocess.run(["lua", "-e", code], env=env, check=True)
+            self.assertEqual(Handler.request_body["params"][2], [])
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

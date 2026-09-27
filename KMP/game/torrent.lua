@@ -3,6 +3,7 @@
 -- the decoded `result` or nil plus a readable error.
 local Torrent = {}
 Torrent.__index = Torrent
+local Json = require("json")
 
 local STATUS_KEYS = {
     "status", "totalLength", "completedLength", "downloadSpeed",
@@ -38,7 +39,7 @@ function Torrent:start(item, directory)
         ["seed-ratio"] = tostring(self.settings.seedRatio or 1.0)
     }
     if type(item.torrent) == "string" and item.torrent ~= "" then
-        return self.rpc("aria2.addTorrent", {item.torrent, {}, options})
+        return self.rpc("aria2.addTorrent", {item.torrent, Json.array(), options})
     end
     return self.rpc("aria2.addUri", {{magnet}, options})
 end

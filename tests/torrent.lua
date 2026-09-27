@@ -27,6 +27,7 @@ assert(backend:start({
     torrent = "ZDQ6aW5mb2Rl"
 }, "/tmp/kmp"))
 assert(calls[#calls].method == "aria2.addTorrent")
+assert(require("json").encode(calls[#calls].params[2]) == "[]")
 assert(backend:status(gid, string.rep("a", 40)) == nil)
 assert(backend:stop(gid) == "OK")
 

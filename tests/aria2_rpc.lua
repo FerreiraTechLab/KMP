@@ -3,6 +3,7 @@ local Json = require("json")
 local Rpc = require("aria2_rpc")
 
 local original = {text = "Olá \"mundo\"", list = {1, true, "x"}}
+assert(Json.encode(Json.array()) == "[]")
 local decoded = assert(Json.decode(Json.encode(original)))
 assert(decoded.text == original.text and decoded.list[2] == true)
 assert(Json.decode('{"x":"\\u00e1"}').x == "á")

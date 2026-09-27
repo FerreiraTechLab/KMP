@@ -1,4 +1,11 @@
 local Json = {}
+local arrayMetatable = {}
+
+function Json.array(value)
+    value = value or {}
+    assert(type(value) == "table", "lista JSON precisa ser tabela")
+    return setmetatable(value, arrayMetatable)
+end
 
 local function utf8char(code)
     if code < 0x80 then return string.char(code) end
@@ -129,7 +136,7 @@ local function encode(value)
     end
     if kind == "table" then
         local out = {}
-        if #value > 0 then
+        if getmetatable(value) == arrayMetatable or #value > 0 then
             for i = 1, #value do out[#out + 1] = encode(value[i]) end
             return "[" .. table.concat(out, ",") .. "]"
         end
