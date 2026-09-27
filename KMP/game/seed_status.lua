@@ -20,7 +20,7 @@ function SeedStatus.find(rpc, expectedHash)
                item.infoHash:lower() == expectedHash:lower() then
                 local total = tonumber(item.totalLength) or 0
                 local uploaded = tonumber(item.uploadLength) or 0
-                return {found = true, phase = item.status or "unknown",
+                return {found = true, gid = item.gid, phase = item.status or "unknown",
                     seeding = item.seeder == "true" and item.status == "active",
                     paused = item.status == "paused",
                     connections = tonumber(item.connections) or 0,

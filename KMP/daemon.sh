@@ -16,7 +16,7 @@ version_file="$state_dir/daemon.version"
 monitor_pid_file="$state_dir/battery-monitor.pid"
 monitor_log_file="$state_dir/battery-monitor.log"
 monitor_script="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/battery_seed.py"
-daemon_version=3
+daemon_version=4
 
 valid_pid() {
   [ -f "$pid_file" ] || return 1
@@ -67,6 +67,7 @@ start_monitor() {
   case "$seed_threshold" in ''|*[!0-9]*) seed_threshold=30 ;; esac
   setsid python3 "$monitor_script" --rpc "http://127.0.0.1:${rpc_port}/jsonrpc" \
     --secret "$rpc_secret" --threshold "$seed_threshold" \
+    --state "$state_dir/battery-paused.json" \
     >> "$monitor_log_file" 2>&1 < /dev/null &
   printf '%s\n' "$!" > "$monitor_pid_file"
 }

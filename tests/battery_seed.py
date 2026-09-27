@@ -27,6 +27,12 @@ class BatterySeedTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.assertIsNone(MODULE.battery_percent(Path(directory)))
 
+    def test_paused_state_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "paused.json"
+            MODULE.save_paused(path, {"abc", "def"})
+            self.assertEqual(MODULE.load_paused(path), {"abc", "def"})
+
 
 if __name__ == "__main__":
     unittest.main()

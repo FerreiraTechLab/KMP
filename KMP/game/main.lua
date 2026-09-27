@@ -123,6 +123,35 @@ local function startSeedStatus(game)
     worker:start(endpoint, secret, game.infoHash)
 end
 
+local function startSeedAction(action, game)
+    if detailsSeed.loading then return end
+    local endpoint = os.getenv("KMP_ARIA2_RPC")
+    local secret = os.getenv("KMP_ARIA2_SECRET")
+    if not endpoint or not secret then return end
+    if (action == "pause_one" or action == "resume_one") and not detailsSeed.gid then return end
+    detailsSeed.loading = true
+    while love.thread.getChannel("seed_action_done"):pop() do end
+    local worker = love.thread.newThread([[
+        local endpoint, secret, action, gid = ...
+        local Rpc = require("aria2_rpc")
+        local Control = require("seed_control")
+        local rpc = Rpc.new(endpoint, secret)
+        local ok, result, err
+        if action == "pause_one" then
+            result, err = rpc("aria2.forcePause", {gid}); ok = result ~= nil
+        elseif action == "resume_one" then
+            result, err = rpc("aria2.unpause", {gid}); ok = result ~= nil
+        elseif action == "pause_all" then
+            result, err = Control.pauseAll(rpc); ok = result ~= nil
+        else
+            result, err = Control.resumeAll(rpc); ok = result ~= nil
+        end
+        love.thread.getChannel("seed_action_done"):push({ok = ok, action = action,
+            count = type(result) == "number" and result or nil, error = err})
+    ]])
+    worker:start(endpoint, secret, action, detailsSeed.gid or "")
+end
+
 local function scanInstalledPorts()
     installedPorts = {}
     uninstallError = ""
@@ -336,6 +365,22 @@ function love.load()
 end
 
 function love.update(dt)
+    if showDetails and detailsSeed.loading then
+        local actionEvent = love.thread.getChannel("seed_action_done"):pop()
+        if actionEvent then
+            if actionEvent.ok then
+                local labels = {pause_one = "Semeacao pausada.", resume_one = "Semeacao retomada.",
+                    pause_all = "Todos os seeds foram pausados.",
+                    resume_all = "Todos os seeds foram retomados."}
+                download.statusText = labels[actionEvent.action] or "Semeacao atualizada."
+                download.statusColor = {0.2, 0.85, 0.45}
+            else
+                download.statusText = "Erro na semeacao: " .. tostring(actionEvent.error or "indisponivel")
+                download.statusColor = {1.0, 0.3, 0.3}
+            end
+            startSeedStatus(catalog[selectedIdx])
+        end
+    end
     if showDetails and detailsSeed.loading then
         local seedEvent = love.thread.getChannel("seed_status_done"):pop()
         if seedEvent then
@@ -713,10 +758,15 @@ function love.keypressed(key)
     end
 
     if showDetails then
-        if key == "b" or key == "return" then
+        local game = catalog[selectedIdx]
+        if key == "return" and game.installed then
+            startSeedAction(detailsSeed.paused and "resume_one" or "pause_one", game)
+        elseif key == "return" then
             showDetails = false
-            startDownload(catalog[selectedIdx])
-        elseif key == "a" or key == "space" or key == "escape" or key == "backspace" then
+            startDownload(game)
+        elseif key == "x" and game.installed then startSeedAction("pause_all", game)
+        elseif key == "y" and game.installed then startSeedAction("resume_all", game)
+        elseif key == "b" or key == "space" or key == "escape" or key == "backspace" then
             showDetails = false
         end
         return
@@ -791,8 +841,7 @@ function love.keypressed(key)
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
                 showMenu = false
-                appState = "power_menu"
-                powerMenuSelected = 1
+                handleActionExit()
             end
         elseif key == "a" or key == "space" or key == "escape" or key == "q" or key == "backspace" then
             showMenu = false
@@ -864,9 +913,16 @@ function love.gamepadpressed(joystick, button)
     end
 
     if showDetails then
-        if button == "a" and not catalog[selectedIdx].installed then
+        local game = catalog[selectedIdx]
+        if button == "a" and game.installed then
+            startSeedAction(detailsSeed.paused and "resume_one" or "pause_one", game)
+        elseif button == "a" then
             showDetails = false
-            startDownload(catalog[selectedIdx])
+            startDownload(game)
+        elseif button == "x" and game.installed then
+            startSeedAction("pause_all", game)
+        elseif button == "y" and game.installed then
+            startSeedAction("resume_all", game)
         elseif button == "b" or button == "back" or button == "start" then showDetails = false end
         return
     end
@@ -940,8 +996,7 @@ function love.gamepadpressed(joystick, button)
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
                 showMenu = false
-                appState = "power_menu"
-                powerMenuSelected = 1
+                handleActionExit()
             end
         elseif button == "b" or button == "back" or button == "start" then
             showMenu = false
@@ -1508,7 +1563,10 @@ function love.draw()
                         85, 324, 470, "center")
                 end
                 love.graphics.setColor(0.5, 0.6, 0.7)
-                love.graphics.printf("B: voltar", 90, 380, 460, "center")
+                local oneAction = detailsSeed.paused and "A: retomar este" or "A: pausar este"
+                love.graphics.printf(oneAction .. "   X: pausar todos   Y: retomar todos",
+                    75, 355, 490, "center")
+                love.graphics.printf("B: voltar", 90, 382, 460, "center")
             else
                 love.graphics.printf("A: instalar   B: voltar", 90, 380, 460, "center")
             end
