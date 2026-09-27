@@ -608,7 +608,8 @@ local function handleShutdown()
 end
 
 local function handleActionExit()
-    love.event.quit()
+    if bgm then bgm:stop() end
+    os.exit(0)
 end
 
 local function loadCatalogTrust()

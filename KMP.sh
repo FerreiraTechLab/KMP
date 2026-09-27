@@ -95,4 +95,6 @@ $GPTOKEYB "$LOVE_GPTK" &
 pm_platform_helper "$LOVE_BINARY"
 $LOVE_RUN "$GAMEDIR/game.love"
 
+printf 'Interface encerrada; restaurando frontend.\n'
 pm_finish
+printf 'KDownloader PM finalizado.\n'

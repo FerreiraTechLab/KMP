@@ -3,6 +3,11 @@ local graphics = setmetatable({}, {__index = function() return function() end en
 graphics.getDimensions = function() return 640, 480 end
 graphics.newFont = function() return {} end
 local channels, quitCalled = {}, false
+local originalExit = os.exit
+os.exit = function(code)
+    assert(code == 0)
+    quitCalled = true
+end
 love = {
     graphics = graphics,
     system = {getOS = function() return "Linux" end},
@@ -26,4 +31,5 @@ love.gamepadpressed(nil, "a")
 assert(not quitCalled, "Sair deve primeiro abrir o menu de energia")
 love.gamepadpressed(nil, "a")
 assert(quitCalled, "A deve confirmar Sair do Aplicativo")
+os.exit = originalExit
 print("main controls tests: ok")
