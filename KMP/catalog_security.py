@@ -144,12 +144,22 @@ def validate_catalog_document(document: object, sequence: int) -> None:
             raise VerificationError(prefix + "sizeBytes inválido")
         info_hash = item.get("infoHash")
         magnet = item.get("magnet")
+        torrent = item.get("torrent")
         if not isinstance(info_hash, str) or not INFO_HASH.fullmatch(info_hash):
             raise VerificationError(prefix + "infoHash inválido")
         if not isinstance(magnet, str) or not re.search(
                 r"(?:^magnet:\?xt=|[?&]xt=)urn:btih:" + re.escape(info_hash) + r"(?:&|$)",
                 magnet, re.IGNORECASE):
             raise VerificationError(prefix + "magnet não corresponde ao infoHash")
+        if torrent is not None:
+            if not isinstance(torrent, str):
+                raise VerificationError(prefix + "torrent inválido")
+            try:
+                torrent_bytes = base64.b64decode(torrent, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise VerificationError(prefix + "torrent inválido") from exc
+            if not 1 <= len(torrent_bytes) <= 64 * 1024:
+                raise VerificationError(prefix + "torrent inválido")
         package = item.get("packageFile")
         if not _safe_path(package) or "/" in package or not package.lower().endswith(".zip"):
             raise VerificationError(prefix + "packageFile inválido")

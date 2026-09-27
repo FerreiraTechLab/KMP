@@ -21,6 +21,12 @@ assert(calls[1].method == "aria2.addUri")
 assert(calls[1].params[2]["max-upload-limit"] == "100K")
 local status = assert(backend:status(gid, hash))
 assert(status.percent == 50 and status.downloadBytesPerSecond == 2048)
+
+assert(backend:start({
+    magnet = "magnet:?xt=urn:btih:" .. hash,
+    torrent = "ZDQ6aW5mb2Rl"
+}, "/tmp/kmp"))
+assert(calls[#calls].method == "aria2.addTorrent")
 assert(backend:status(gid, string.rep("a", 40)) == nil)
 assert(backend:stop(gid) == "OK")
 

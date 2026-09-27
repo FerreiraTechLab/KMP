@@ -41,6 +41,11 @@ local function validateItem(item, ids, portIds, roots)
     if not magnetHash or magnetHash:lower() ~= item.infoHash:lower() then
         return nil, "magnet não corresponde ao infoHash"
     end
+    if item.torrent ~= nil and
+       (type(item.torrent) ~= "string" or #item.torrent == 0 or
+        #item.torrent > 90000 or not item.torrent:match("^[A-Za-z0-9+/]+=*$")) then
+        return nil, "metainfo torrent inválido"
+    end
     if not safePath(item.packageFile) or item.packageFile:find("/", 1, true) or
        not item.packageFile:lower():match("%.zip$") then
         return nil, "packageFile inválido"

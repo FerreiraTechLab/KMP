@@ -37,6 +37,9 @@ function Torrent:start(item, directory)
         ["seed-time"] = tostring(self.settings.seedMinutes or 120),
         ["seed-ratio"] = tostring(self.settings.seedRatio or 1.0)
     }
+    if type(item.torrent) == "string" and item.torrent ~= "" then
+        return self.rpc("aria2.addTorrent", {item.torrent, {}, options})
+    end
     return self.rpc("aria2.addUri", {{magnet}, options})
 end
 
