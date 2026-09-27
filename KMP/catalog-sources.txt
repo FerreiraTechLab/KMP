@@ -1,0 +1,4 @@
+# Mirrors oficiais. Cada URL deve servir head.json e head.json.sig.
+https://ferreiratechlab.github.io/KMP-catalog/
+https://raw.githubusercontent.com/FerreiraTechLab/KMP-catalog/main/docs/
+https://github.com/FerreiraTechLab/KMP-catalog/releases/latest/download/

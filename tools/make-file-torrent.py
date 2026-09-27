@@ -22,7 +22,7 @@ def bencode(value):
     raise TypeError(type(value))
 
 
-def build(source: Path, output: Path, trackers: list[str]) -> str:
+def build(source: Path, output: Path, trackers: list[str], web_seeds: list[str]) -> str:
     payload = source.read_bytes()
     if not payload:
         raise ValueError("arquivo vazio")
@@ -40,11 +40,15 @@ def build(source: Path, output: Path, trackers: list[str]) -> str:
         torrent["announce-list"] = [[tracker] for tracker in trackers]
     else:
         torrent["nodes"] = []
+    if web_seeds:
+        torrent["url-list"] = web_seeds
     output.write_bytes(bencode(torrent))
     info_hash = hashlib.sha1(bencode(info)).hexdigest()
     magnet = "magnet:?xt=urn:btih:" + info_hash + "&dn=" + quote(source.name)
     for tracker in trackers:
         magnet += "&tr=" + quote(tracker, safe="")
+    for web_seed in web_seeds:
+        magnet += "&ws=" + quote(web_seed, safe="")
     return magnet
 
 
@@ -53,9 +57,13 @@ def main():
     parser.add_argument("source", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--tracker", action="append", default=[])
+    parser.add_argument(
+        "--web-seed", action="append", default=[],
+        help="HTTPS URL do arquivo; pode ser repetida para adicionar mirrors",
+    )
     args = parser.parse_args()
     try:
-        magnet = build(args.source, args.output, args.tracker)
+        magnet = build(args.source, args.output, args.tracker, args.web_seed)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     print(magnet)

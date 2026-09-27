@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -179,10 +180,14 @@ def download_snapshot(head: dict, directory: Path, rpc, timeout: int = 300,
     if not match:
         raise VerificationError("infoHash ausente no magnet do catálogo")
     expected_hash = match.group(1).lower()
-    gid = rpc("aria2.addUri", [[head["catalogMagnet"]], {
+    options = {
         "dir": str(directory), "continue": "true", "check-integrity": "true",
         "auto-file-renaming": "false", "seed-ratio": "0",
-    }])
+    }
+    if head.get("catalogTorrent"):
+        gid = rpc("aria2.addTorrent", [head["catalogTorrent"], [], options])
+    else:
+        gid = rpc("aria2.addUri", [[head["catalogMagnet"]], options])
     if not isinstance(gid, str) or not re.fullmatch(r"[0-9a-fA-F]+", gid):
         raise VerificationError("aria2 não iniciou o catálogo")
     deadline = time.monotonic() + timeout

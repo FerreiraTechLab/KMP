@@ -74,6 +74,7 @@ def validate_head(document: object, now: datetime | None = None) -> dict:
     digest = document.get("catalogSha256")
     magnet = document.get("catalogMagnet")
     encoded_signature = document.get("catalogSignature")
+    encoded_torrent = document.get("catalogTorrent")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         raise VerificationError("sequência inválida")
     if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_CATALOG_BYTES:
@@ -90,6 +91,15 @@ def validate_head(document: object, now: datetime | None = None) -> dict:
         raise VerificationError("assinatura do catálogo inválida") from exc
     if len(signature) != 64:
         raise VerificationError("assinatura do catálogo inválida")
+    if encoded_torrent is not None:
+        if not isinstance(encoded_torrent, str):
+            raise VerificationError("torrent do catálogo inválido")
+        try:
+            torrent = base64.b64decode(encoded_torrent, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise VerificationError("torrent do catálogo inválido") from exc
+        if not 1 <= len(torrent) <= 16384:
+            raise VerificationError("torrent do catálogo inválido")
     published = parse_time(document.get("publishedAt"), "publishedAt")
     expires = parse_time(document.get("expiresAt"), "expiresAt")
     now = now or datetime.now(timezone.utc)

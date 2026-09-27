@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.1
+# KDownloader PM v0.2.2
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
@@ -6,25 +6,23 @@ BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
 The persistent seeding and signed distributed catalogue design for the next
 milestone is documented in [ARCHITECTURE-v0.2.md](ARCHITECTURE-v0.2.md).
 
-When `KMP/catalog-sources.txt` and `KMP/catalog-root.pub` are installed, the app
-uses the signed schema-2 flow. It discovers the newest valid head, downloads its
-single-file catalogue torrent through the persistent aria2 daemon, atomically
-activates it, and keeps the torrent available for seeding. Without those files,
-the schema-1 preview remains the migration fallback.
+The package includes the official mirror list and Ed25519 public key. The app
+discovers the newest signed head, downloads its single-file catalogue through
+the persistent aria2 daemon, atomically activates it, and keeps the torrent
+available for seeding. The signed head embeds the torrent metadata and the
+torrent includes GitHub web seeds, so a first peer can bootstrap without an
+existing console seeder.
 
 ## Setup on the R36H
 
 1. Install the Debian torrent client: `sudo apt install aria2`.
 2. Put the PortMaster files in `/roms/ports/`: `KMP.sh` and the `KMP/` folder.
-3. The preview opens its bundled demo catalogue. For a different catalogue,
-   create `/roms/ports/KMP/catalog-url.txt` with **one HTTPS URL**. A local
-   `file://` URL is also supported for tests. See
-   [the catalogue contract](ARCHITECTURE-v0.1.md).
-4. Open KMP from the Ports menu. The app starts its own local `aria2c` process
-   and stops it when the app closes. It limits total upload to 100 KiB/s.
+3. Open KMP from the Ports menu. It connects to its persistent local `aria2c`
+   daemon, which restores downloads and seeds from the previous session. The
+   default total upload limit is 100 KiB/s.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.1.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.2.zip`; its contents match the layout in `KMP/port.json`.
 
 The catalogue contains a **single-file torrent** whose only file is the ZIP
 named by `packageFile`. The ZIP must contain exactly the declared `install.paths`
@@ -65,9 +63,8 @@ luac -p KMP/game/*.lua
 bash -n KMP.sh
 ```
 
-The integration still needs testing on the R36H and a second peer. The
-development machine does not have LÖVE or aria2 installed, so the graphical
-and swarm flow has not run here. The `demo/` files provide a real test torrent.
+The signed catalogue integration still needs testing on the R36H and a second
+peer. The `demo/` files provide a real test torrent.
 
 The `demo/` folder contains a small public-domain package, its torrent, and a
 matching catalogue. To regenerate it:

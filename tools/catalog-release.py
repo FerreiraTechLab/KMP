@@ -17,12 +17,12 @@ def timestamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def sign(path: Path, key: Path, output: Path) -> bytes:
-    subprocess.run(
-        ["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(key),
-         "-in", str(path), "-out", str(output)],
-        check=True,
-    )
+def sign(path: Path, key: Path, output: Path, passphrase_file: Path | None) -> bytes:
+    command = ["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(key)]
+    if passphrase_file is not None:
+        command.extend(["-passin", "file:" + str(passphrase_file)])
+    command.extend(["-in", str(path), "-out", str(output)])
+    subprocess.run(command, check=True)
     return output.read_bytes()
 
 
@@ -30,6 +30,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("catalog", type=Path)
     parser.add_argument("--private-key", required=True, type=Path)
+    parser.add_argument("--passphrase-file", type=Path)
+    parser.add_argument("--torrent", type=Path,
+                        help="metainfo .torrent incorporado ao head assinado")
     parser.add_argument("--magnet", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--valid-days", type=int, default=30)
@@ -46,13 +49,21 @@ def main() -> int:
         parser.error("magnet inválido")
     if not args.private_key.is_file():
         parser.error("chave privada não encontrada")
+    if args.passphrase_file is not None and not args.passphrase_file.is_file():
+        parser.error("arquivo de senha não encontrado")
+    torrent = None
+    if args.torrent is not None:
+        if not args.torrent.is_file() or not 1 <= args.torrent.stat().st_size <= 16384:
+            parser.error("torrent ausente ou grande demais")
+        torrent = args.torrent.read_bytes()
 
     args.output.mkdir(parents=True, exist_ok=True)
     catalog_name = f"catalog-{sequence:08d}.json"
     catalog_path = args.output / catalog_name
     shutil.copyfile(args.catalog, catalog_path)
     catalog_signature_path = args.output / (catalog_name + ".sig")
-    catalog_signature = sign(catalog_path, args.private_key, catalog_signature_path)
+    catalog_signature = sign(catalog_path, args.private_key, catalog_signature_path,
+                             args.passphrase_file)
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     head = {
@@ -65,10 +76,13 @@ def main() -> int:
         "publishedAt": timestamp(now),
         "expiresAt": timestamp(now + timedelta(days=args.valid_days)),
     }
+    if torrent is not None:
+        head["catalogTorrent"] = base64.b64encode(torrent).decode("ascii")
     head_path = args.output / "head.json"
     head_path.write_text(json.dumps(head, ensure_ascii=False, sort_keys=True,
                                     separators=(",", ":")) + "\n", encoding="utf-8")
-    sign(head_path, args.private_key, args.output / "head.json.sig")
+    sign(head_path, args.private_key, args.output / "head.json.sig",
+         args.passphrase_file)
     print(f"release criada em {args.output} (sequência {sequence})")
     return 0
 
