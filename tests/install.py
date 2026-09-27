@@ -55,6 +55,54 @@ class InstallTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fora do pacote"):
             module.install(self.package, self.base, self.item)
 
+    def test_recovers_each_interrupted_install_step(self):
+        class PowerLoss(BaseException):
+            pass
+
+        for point, expected in (("journaled", "rolled_back"),
+                                ("prepared", "rolled_back"),
+                                ("replaced:example", "rolled_back"),
+                                ("moved:example", "rolled_back"),
+                                ("manifest", "committed")):
+            with self.subTest(point=point), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                package = base / "example.zip"
+                with zipfile.ZipFile(package, "w") as archive:
+                    archive.writestr("example.sh", "#!/bin/sh\n")
+                    archive.writestr("example/data.txt", "data")
+
+                def checkpoint(current):
+                    if current == point:
+                        raise PowerLoss()
+
+                with self.assertRaises(PowerLoss):
+                    module.install(package, base, self.item, checkpoint=checkpoint)
+                result = module.recover(base)
+                self.assertEqual(result, [("example", expected)])
+                manifest = base / ".kmp/manifests/example.json"
+                if expected == "committed":
+                    self.assertTrue(manifest.is_file())
+                    self.assertTrue((base / "example.sh").is_file())
+                    self.assertTrue((base / "example/data.txt").is_file())
+                else:
+                    self.assertFalse(manifest.exists())
+                    self.assertFalse((base / "example.sh").exists())
+                    self.assertFalse((base / "example").exists())
+                self.assertEqual(list((base / ".kmp/transactions").glob("*.json")), [])
+
+    def test_normal_failure_rolls_back_immediately(self):
+        self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})
+
+        def checkpoint(point):
+            if point.startswith("moved:"):
+                raise RuntimeError("simulated")
+
+        with self.assertRaisesRegex(RuntimeError, "simulated"):
+            module.install(self.package, self.base, self.item, checkpoint=checkpoint)
+        self.assertFalse((self.base / "example.sh").exists())
+        self.assertFalse((self.base / "example").exists())
+        self.assertEqual(module.recover(self.base), [])
+
 
 if __name__ == "__main__":
     unittest.main()

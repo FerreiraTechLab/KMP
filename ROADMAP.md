@@ -28,12 +28,12 @@ auditoria.
 
 ### P0 — integridade da instalação
 
-- [ ] Criar journal persistente para instalações.
-- [ ] Registrar os estados `prepared`, `moving` e `committed`.
-- [ ] Recuperar ou reverter automaticamente uma instalação interrompida por
+- [x] Criar journal persistente para instalações.
+- [x] Registrar os estados `prepared`, `moving` e `committed`.
+- [x] Recuperar ou reverter automaticamente uma instalação interrompida por
       queda de energia.
-- [ ] Fazer `fsync` dos arquivos e diretórios importantes antes do commit.
-- [ ] Testar interrupção após cada etapa da instalação.
+- [x] Fazer `fsync` dos arquivos e diretórios importantes antes do commit.
+- [x] Testar interrupção após cada etapa da instalação.
 
 Critério de conclusão: após desligamento forçado em qualquer etapa, a próxima
 execução deixa o port completamente instalado ou completamente removido, sem

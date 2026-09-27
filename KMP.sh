@@ -36,6 +36,14 @@ export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export KMP_INSTALLER="$GAMEDIR/install.py"
 export KMP_CATALOG_SYNC="$GAMEDIR/catalog_sync.py"
 export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
+
+# Finish or roll back installations interrupted by a previous power loss.
+for recovery_root in /roms/ports /roms2/ports; do
+  if [ -d "$recovery_root" ]; then
+    python3 "$KMP_INSTALLER" recover "$recovery_root" || \
+      printf 'Falha ao recuperar instalações em %s\n' "$recovery_root" >&2
+  fi
+done
 if [ -f "$GAMEDIR/catalog-sources.txt" ] && [ -f "$GAMEDIR/catalog-root.pub" ]; then
   export KMP_CATALOG_SOURCES="$GAMEDIR/catalog-sources.txt"
   export KMP_CATALOG_PUBLIC_KEY="$GAMEDIR/catalog-root.pub"

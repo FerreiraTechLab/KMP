@@ -10,6 +10,105 @@ import tempfile
 import zipfile
 
 
+def fsync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def durable_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+    fsync_directory(path.parent)
+
+
+def fsync_tree(root):
+    directories = [root]
+    for path in root.rglob("*"):
+        if path.is_dir():
+            directories.append(path)
+        elif path.is_file():
+            with path.open("rb") as handle:
+                os.fsync(handle.fileno())
+    for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+        fsync_directory(directory)
+
+
+def remove_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def validate_transaction(base, transaction):
+    if not isinstance(transaction, dict) or transaction.get("schemaVersion") != 1:
+        raise ValueError("journal de instalação inválido")
+    port_id = transaction.get("portId")
+    roots = transaction.get("roots")
+    stage_name = transaction.get("stage")
+    record = transaction.get("record")
+    if not isinstance(port_id, str) or not port_id or not all(
+            c.islower() or c.isdigit() or c in "_-" for c in port_id):
+        raise ValueError("journal de instalação inválido")
+    if not isinstance(roots, list) or not roots or any(
+            not safe_relative(root) or "/" in root for root in roots):
+        raise ValueError("journal de instalação inválido")
+    if not isinstance(stage_name, str) or not stage_name.startswith(".kmp-stage-") or "/" in stage_name:
+        raise ValueError("journal de instalação inválido")
+    if not isinstance(record, dict) or record.get("portId") != port_id or record.get("roots") != roots:
+        raise ValueError("journal de instalação inválido")
+    return port_id, roots, base / stage_name, record
+
+
+def recover_transaction(base, journal):
+    transaction = json.loads(journal.read_text(encoding="utf-8"))
+    port_id, roots, stage, record = validate_transaction(base, transaction)
+    manifest_dir = base / ".kmp" / "manifests"
+    manifest = manifest_dir / (port_id + ".json")
+    committed = False
+    if manifest.is_file():
+        try:
+            committed = json.loads(manifest.read_text(encoding="utf-8")) == record and all(
+                (base / root).exists() for root in roots)
+        except (OSError, json.JSONDecodeError):
+            committed = False
+        if not committed:
+            raise ValueError("manifesto diverge de instalação interrompida")
+    if not committed:
+        for root in roots:
+            remove_path(base / root)
+        temporary_manifest = manifest.with_suffix(".json.tmp")
+        if temporary_manifest.exists() or temporary_manifest.is_symlink():
+            remove_path(temporary_manifest)
+        fsync_directory(base)
+    remove_path(stage)
+    journal.unlink()
+    fsync_directory(journal.parent)
+    return "committed" if committed else "rolled_back"
+
+
+def recover(base_path):
+    base = Path(base_path).resolve()
+    transaction_dir = base / ".kmp" / "transactions"
+    if not transaction_dir.exists():
+        return []
+    if transaction_dir.is_symlink():
+        raise ValueError("diretório de transações inválido")
+    results = []
+    for journal in sorted(transaction_dir.glob("*.json")):
+        results.append((journal.stem, recover_transaction(base, journal)))
+    return results
+
+
 def safe_relative(name):
     if not name or "\\" in name or "\x00" in name or ":" in name:
         return False
@@ -63,7 +162,7 @@ def validate_zip(archive, item):
     return files, total, modes
 
 
-def install(zip_path, base_path, item):
+def install(zip_path, base_path, item, checkpoint=None):
     base = Path(base_path).resolve()
     if not base.is_dir():
         raise ValueError("diretório de ports não existe")
@@ -72,9 +171,12 @@ def install(zip_path, base_path, item):
     port_id = item["install"]["portId"]
     if not port_id or not all(c.islower() or c.isdigit() or c in "_-" for c in port_id):
         raise ValueError("identificador do port inválido")
-    manifest_dir = base / ".kmp" / "manifests"
-    if (base / ".kmp").is_symlink() or manifest_dir.is_symlink():
+    kmp_dir = base / ".kmp"
+    manifest_dir = kmp_dir / "manifests"
+    transaction_dir = kmp_dir / "transactions"
+    if kmp_dir.is_symlink() or manifest_dir.is_symlink() or transaction_dir.is_symlink():
         raise ValueError("diretório de manifestos inválido")
+    recover(base)
     manifest = manifest_dir / (port_id + ".json")
     if manifest.exists():
         raise ValueError("port já instalado")
@@ -90,39 +192,53 @@ def install(zip_path, base_path, item):
             if (base / root).exists():
                 raise ValueError("destino já ocupado: " + root)
         stage = Path(tempfile.mkdtemp(prefix=".kmp-stage-", dir=base))
-        moved = []
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        transaction_dir.mkdir(parents=True, exist_ok=True)
+        record = {
+            "id": item["id"], "version": item["version"],
+            "infoHash": item["infoHash"], "portId": port_id,
+            "files": files, "roots": roots,
+        }
+        journal = transaction_dir / (port_id + ".json")
+        transaction = {"schemaVersion": 1, "state": "preparing", "portId": port_id,
+                       "stage": stage.name, "roots": roots, "moved": [], "record": record}
         try:
+            durable_json(journal, transaction)
+            if checkpoint: checkpoint("journaled")
             archive.extractall(stage)
             for name, mode in modes.items():
                 os.chmod(stage / name, mode)
+            fsync_tree(stage)
+            transaction["state"] = "prepared"
+            durable_json(journal, transaction)
+            if checkpoint: checkpoint("prepared")
+            transaction["state"] = "moving"
             for root in roots:
                 os.replace(stage / root, base / root)
-                moved.append(root)
-            manifest_dir.mkdir(parents=True, exist_ok=True)
-            record = {
-                "id": item["id"], "version": item["version"],
-                "infoHash": item["infoHash"], "portId": port_id,
-                "files": files,
-                "roots": roots,
-            }
-            temporary = manifest.with_suffix(".json.tmp")
-            temporary.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-            os.replace(temporary, manifest)
+                fsync_directory(base)
+                if checkpoint: checkpoint("replaced:" + root)
+                transaction["moved"].append(root)
+                durable_json(journal, transaction)
+                if checkpoint: checkpoint("moved:" + root)
+            durable_json(manifest, record)
+            if checkpoint: checkpoint("manifest")
+            transaction["state"] = "committed"
+            durable_json(journal, transaction)
+            remove_path(stage)
+            journal.unlink()
+            fsync_directory(transaction_dir)
         except Exception:
-            for root in moved:
-                target = base / root
-                if target.is_dir():
-                    shutil.rmtree(target)
-                elif target.exists():
-                    target.unlink()
+            if journal.exists():
+                recover_transaction(base, journal)
+            else:
+                remove_path(stage)
             raise
-        finally:
-            shutil.rmtree(stage)
     return manifest
 
 
 def uninstall(base_path, port_id):
     base = Path(base_path).resolve()
+    recover(base)
     if not port_id or not all(c.islower() or c.isdigit() or c in "_-" for c in port_id):
         raise ValueError("identificador do port inválido")
     manifest = base / ".kmp" / "manifests" / (port_id + ".json")
@@ -162,8 +278,10 @@ def main():
     elif len(sys.argv) == 4 and sys.argv[1] == "uninstall":
         uninstall(Path(sys.argv[2]), sys.argv[3])
         print("Removido")
+    elif len(sys.argv) == 3 and sys.argv[1] == "recover":
+        print(json.dumps(recover(Path(sys.argv[2]))))
     else:
-        raise ValueError("uso: install.py install ZIP PORTS ITEM.json | uninstall PORTS ID")
+        raise ValueError("uso: install.py install ZIP PORTS ITEM.json | uninstall PORTS ID | recover BASE")
 
 
 if __name__ == "__main__":
