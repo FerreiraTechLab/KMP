@@ -5,6 +5,8 @@ BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
 
 The persistent seeding and signed distributed catalogue design for the next
 milestone is documented in [ARCHITECTURE-v0.2.md](ARCHITECTURE-v0.2.md).
+Product priorities, open client gaps, and the deferred KMP Publisher plan are
+tracked in [ROADMAP.md](ROADMAP.md).
 
 The package includes the official mirror list and Ed25519 public key. The app
 discovers the newest signed head, downloads its single-file catalogue through
