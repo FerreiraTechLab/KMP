@@ -35,6 +35,10 @@ local searchQuery = ""
 local searchSelected = 1
 local searchChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 local showDetails = false
+local catalogTrust = {
+    configured = false, verified = false, active = false, sequence = 0,
+    mirrors = 0, fingerprint = "", expiresAt = "", error = ""
+}
 
 local showRestartPopup = false
 local restartPopupTimer = 0
@@ -527,6 +531,30 @@ local function handleActionExit()
     love.event.quit()
 end
 
+local function loadCatalogTrust()
+    catalogTrust = {configured = false, verified = false, active = false,
+        sequence = 0, mirrors = 0, fingerprint = "", expiresAt = "", error = ""}
+    if CATALOG_SYNC == "" or CATALOG_SOURCES == "" or CATALOG_PUBLIC_KEY == "" then
+        return
+    end
+    local command = "python3 " .. shellQuote(CATALOG_SYNC) .. " status" ..
+        " --sources " .. shellQuote(CATALOG_SOURCES) ..
+        " --public-key " .. shellQuote(CATALOG_PUBLIC_KEY) ..
+        " --state " .. shellQuote(CATALOG_STATE) ..
+        " --pending " .. shellQuote(CATALOG_PENDING) ..
+        " --active " .. shellQuote(CATALOG_ACTIVE) .. " 2>/dev/null"
+    local process = io.popen(command)
+    local output = process and process:read("*a") or ""
+    local ok = process and process:close()
+    local parsed = output ~= "" and Json.decode(output) or nil
+    if ok and type(parsed) == "table" and parsed.ok then
+        catalogTrust = parsed
+        catalogTrust.error = ""
+    else
+        catalogTrust.error = type(parsed) == "table" and parsed.error or "Status indisponível"
+    end
+end
+
 local function handleNavUp()
     if download.active or syncing or #catalog == 0 then return end
     selectedIdx = selectedIdx - 1
@@ -618,6 +646,15 @@ end
 function love.keypressed(key)
     if appState == "splash" then return end
 
+    if appState == "catalog_trust" then
+        if key == "a" or key == "b" or key == "return" or key == "space" or
+           key == "escape" or key == "q" or key == "backspace" then
+            appState = "main"
+            showMenu = true
+        end
+        return
+    end
+
     if showRestartPopup then
         if key == "return" or key == "b" or key == "space" or key == "a" or key == "escape" or key == "x" then
             showRestartPopup = false
@@ -701,10 +738,10 @@ function love.keypressed(key)
     if showMenu then
         if key == "up" or key == "w" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 4 end
+            if menuSelected < 1 then menuSelected = 5 end
         elseif key == "down" or key == "s" then
             menuSelected = menuSelected + 1
-            if menuSelected > 4 then menuSelected = 1 end
+            if menuSelected > 5 then menuSelected = 1 end
         elseif key == "b" or key == "return" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -715,6 +752,10 @@ function love.keypressed(key)
                 scanInstalledPorts()
                 appState = "uninstaller"
             elseif menuSelected == 4 then
+                showMenu = false
+                loadCatalogTrust()
+                appState = "catalog_trust"
+            elseif menuSelected == 5 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -756,6 +797,14 @@ end
 
 function love.gamepadpressed(joystick, button)
     if appState == "splash" then return end
+
+    if appState == "catalog_trust" then
+        if button == "a" or button == "b" or button == "back" or button == "start" then
+            appState = "main"
+            showMenu = true
+        end
+        return
+    end
 
     if showRestartPopup then
         if button == "a" or button == "b" or button == "back" or button == "start" then
@@ -838,10 +887,10 @@ function love.gamepadpressed(joystick, button)
     if showMenu then
         if button == "dpup" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 4 end
+            if menuSelected < 1 then menuSelected = 5 end
         elseif button == "dpdown" then
             menuSelected = menuSelected + 1
-            if menuSelected > 4 then menuSelected = 1 end
+            if menuSelected > 5 then menuSelected = 1 end
         elseif button == "b" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -852,6 +901,10 @@ function love.gamepadpressed(joystick, button)
                 scanInstalledPorts()
                 appState = "uninstaller"
             elseif menuSelected == 4 then
+                showMenu = false
+                loadCatalogTrust()
+                appState = "catalog_trust"
+            elseif menuSelected == 5 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -896,7 +949,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavUp()
             elseif showMenu then
                 menuSelected = menuSelected - 1
-                if menuSelected < 1 then menuSelected = 4 end
+                if menuSelected < 1 then menuSelected = 5 end
             elseif not showMenu and appState == "main" then 
                 handleNavUp() 
             end
@@ -908,7 +961,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavDown()
             elseif showMenu then
                 menuSelected = menuSelected + 1
-                if menuSelected > 4 then menuSelected = 1 end
+                if menuSelected > 5 then menuSelected = 1 end
             elseif not showMenu and appState == "main" then 
                 handleNavDown() 
             end
@@ -1286,20 +1339,20 @@ function love.draw()
             love.graphics.rectangle("fill", 0, 0, 640, 480)
 
             love.graphics.setColor(0.1, 0.15, 0.22, 0.98)
-            love.graphics.rectangle("fill", 170, 95, 300, 290, 12, 12)
+            love.graphics.rectangle("fill", 170, 65, 300, 355, 12, 12)
 
             love.graphics.setColor(0.0, 0.82, 1.0, 0.6)
             love.graphics.setLineWidth(2)
-            love.graphics.rectangle("line", 170, 95, 300, 290, 12, 12)
+            love.graphics.rectangle("line", 170, 65, 300, 355, 12, 12)
 
             love.graphics.setColor(0.96, 0.97, 1.0)
             love.graphics.setFont(fontTitle)
-            love.graphics.printf("MENU DE OPCOES", 170, 110, 300, "center")
+            love.graphics.printf("MENU DE OPCOES", 170, 80, 300, "center")
 
             love.graphics.setColor(1, 1, 1, 0.1)
-            love.graphics.line(190, 140, 450, 140)
+            love.graphics.line(190, 110, 450, 110)
 
-            local opt1_y = 160
+            local opt1_y = 130
             if menuSelected == 1 then
                 love.graphics.setColor(0.0, 0.82, 1.0, 0.2)
                 love.graphics.rectangle("fill", 190, opt1_y - 6, 260, 36, 6, 6)
@@ -1310,7 +1363,7 @@ function love.draw()
             love.graphics.setFont(fontItem)
             love.graphics.printf("Mudar Destino: " .. sdLabels[currentSd], 170, opt1_y, 300, "center")
 
-            local opt2_y = 210
+            local opt2_y = 175
             if menuSelected == 2 then
                 love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
                 love.graphics.rectangle("fill", 190, opt2_y - 6, 260, 36, 6, 6)
@@ -1320,7 +1373,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Pesquisar por nome", 170, opt2_y, 300, "center")
 
-            local opt3_y = 260
+            local opt3_y = 220
             if menuSelected == 3 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt3_y - 6, 260, 36, 6, 6)
@@ -1330,7 +1383,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Desinstalador de Ports", 170, opt3_y, 300, "center")
 
-            local opt4_y = 310
+            local opt4_y = 265
             if menuSelected == 4 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt4_y - 6, 260, 36, 6, 6)
@@ -1338,11 +1391,21 @@ function love.draw()
                 love.graphics.rectangle("line", 190, opt4_y - 6, 260, 36, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Sair", 170, opt4_y, 300, "center")
+            love.graphics.printf("Confianca do Catalogo", 170, opt4_y, 300, "center")
+
+            local opt5_y = 310
+            if menuSelected == 5 then
+                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
+                love.graphics.rectangle("fill", 190, opt5_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1.0, 0.3, 0.3)
+                love.graphics.rectangle("line", 190, opt5_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1, 1, 1)
+            else love.graphics.setColor(0.6, 0.65, 0.75) end
+            love.graphics.printf("Sair", 170, opt5_y, 300, "center")
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("B: Confirmar   A: Voltar", 170, 360, 300, "center")
+            love.graphics.printf("B: Confirmar   A: Voltar", 170, 385, 300, "center")
         end
 
         if showSearch then
@@ -1391,6 +1454,53 @@ function love.draw()
             love.graphics.setColor(0.5, 0.6, 0.7)
             love.graphics.printf("Destino: " .. sdLabels[currentSd], 110, 315, 420, "center")
             love.graphics.printf("B: instalar   A: voltar", 110, 345, 420, "center")
+        end
+
+        if appState == "catalog_trust" then
+            love.graphics.setColor(0, 0, 0, 0.9)
+            love.graphics.rectangle("fill", 0, 0, 640, 480)
+            love.graphics.setColor(0.08, 0.12, 0.18, 0.99)
+            love.graphics.rectangle("fill", 70, 55, 500, 365, 12, 12)
+            local trusted = catalogTrust.configured and catalogTrust.verified and catalogTrust.active
+            love.graphics.setColor(trusted and 0.2 or 0.95, trusted and 0.85 or 0.65,
+                trusted and 0.45 or 0.2, 0.8)
+            love.graphics.setLineWidth(2)
+            love.graphics.rectangle("line", 70, 55, 500, 365, 12, 12)
+            love.graphics.setFont(fontTitle)
+            love.graphics.printf("CONFIANCA DO CATALOGO", 90, 78, 460, "center")
+
+            love.graphics.setFont(fontItem)
+            love.graphics.setColor(trusted and 0.2 or 0.95, trusted and 0.85 or 0.65,
+                trusted and 0.45 or 0.2)
+            local stateText = "Modo legado (sem chave oficial)"
+            if catalogTrust.configured and trusted then stateText = "Catalogo oficial verificado"
+            elseif catalogTrust.configured then stateText = "Catalogo oficial aguardando verificacao" end
+            love.graphics.printf(stateText, 95, 120, 450, "center")
+
+            love.graphics.setFont(fontSub)
+            love.graphics.setColor(0.78, 0.84, 0.92)
+            local sequence = tonumber(catalogTrust.sequence) or 0
+            love.graphics.print("Sequencia aceita:", 105, 175)
+            love.graphics.printf(tostring(sequence), 310, 175, 220, "right")
+            love.graphics.print("Mirrors configurados:", 105, 207)
+            love.graphics.printf(tostring(catalogTrust.mirrors or 0), 310, 207, 220, "right")
+            love.graphics.print("Snapshot ativo:", 105, 239)
+            love.graphics.printf(catalogTrust.active and "sim" or "nao", 310, 239, 220, "right")
+            love.graphics.print("Validade do head:", 105, 271)
+            love.graphics.printf(catalogTrust.expiresAt ~= "" and catalogTrust.expiresAt or "-",
+                270, 271, 260, "right")
+
+            love.graphics.setColor(0.48, 0.58, 0.7)
+            love.graphics.print("Fingerprint Ed25519 (SHA-256):", 105, 310)
+            love.graphics.setColor(0.86, 0.9, 0.96)
+            love.graphics.printf(catalogTrust.fingerprint ~= "" and catalogTrust.fingerprint or "-",
+                105, 334, 430, "center")
+            if catalogTrust.error and catalogTrust.error ~= "" then
+                love.graphics.setColor(1.0, 0.35, 0.35)
+                love.graphics.printf(catalogTrust.error, 105, 360, 430, "center")
+            end
+            love.graphics.setColor(0.48, 0.58, 0.7)
+            love.graphics.printf("A/B: Voltar", 105, 390, 430, "center")
         end
 
         if appState == "power_menu" then

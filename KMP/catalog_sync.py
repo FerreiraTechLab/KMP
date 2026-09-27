@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import time
 import re
+import subprocess
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
@@ -234,6 +236,42 @@ def sync_catalog(sources_path: Path, public_key: Path, state_path: Path,
     return {**discovered, **activated}
 
 
+def catalogue_status(sources_path: Path, public_key: Path, state_path: Path,
+                     pending_dir: Path, active_path: Path) -> dict:
+    result = {"configured": False, "verified": False, "sequence": 0,
+              "mirrors": 0, "fingerprint": "", "expiresAt": "",
+              "active": active_path.is_file()}
+    if not sources_path.is_file() or not public_key.is_file():
+        return result
+    result["configured"] = True
+    result["mirrors"] = len(read_sources(sources_path))
+    key_result = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", str(public_key), "-outform", "DER"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+    )
+    if key_result.returncode != 0 or not key_result.stdout:
+        raise VerificationError("chave pública inválida")
+    digest = hashlib.sha256(key_result.stdout).hexdigest().upper()
+    result["fingerprint"] = ":".join(digest[index:index + 4]
+                                      for index in range(0, 32, 4))
+    if state_path.is_file():
+        try:
+            state = json.loads(state_path.read_bytes())
+            sequence = state.get("highestSequence", 0)
+            if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence >= 0:
+                result["sequence"] = sequence
+        except (OSError, json.JSONDecodeError):
+            pass
+    head_path = pending_dir / "head.json"
+    signature_path = pending_dir / "head.json.sig"
+    if head_path.is_file() and signature_path.is_file():
+        head = load_verified_head(head_path, signature_path, public_key)
+        result["verified"] = True
+        result["sequence"] = max(result["sequence"], head["sequence"])
+        result["expiresAt"] = head["expiresAt"]
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -258,6 +296,12 @@ def main() -> int:
     sync_parser.add_argument("--active", required=True, type=Path)
     sync_parser.add_argument("--rpc", required=True)
     sync_parser.add_argument("--secret", required=True)
+    status_parser = subparsers.add_parser("status")
+    status_parser.add_argument("--sources", required=True, type=Path)
+    status_parser.add_argument("--public-key", required=True, type=Path)
+    status_parser.add_argument("--state", required=True, type=Path)
+    status_parser.add_argument("--pending", required=True, type=Path)
+    status_parser.add_argument("--active", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "discover":
@@ -266,10 +310,13 @@ def main() -> int:
         elif args.command == "activate":
             result = activate(args.head, args.head_signature, args.catalog,
                               args.public_key, args.state, args.active)
-        else:
+        elif args.command == "sync":
             result = sync_catalog(args.sources, args.public_key, args.state,
                                   args.pending, args.downloads, args.active,
                                   args.rpc, args.secret)
+        else:
+            result = catalogue_status(args.sources, args.public_key, args.state,
+                                      args.pending, args.active)
     except (VerificationError, OSError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
         return 1

@@ -1,4 +1,4 @@
-# KDownloader PM v0.1.7
+# KDownloader PM v0.2.1
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
@@ -24,7 +24,7 @@ the schema-1 preview remains the migration fallback.
    and stops it when the app closes. It limits total upload to 100 KiB/s.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.1.7.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.1.zip`; its contents match the layout in `KMP/port.json`.
 
 The catalogue contains a **single-file torrent** whose only file is the ZIP
 named by `packageFile`. The ZIP must contain exactly the declared `install.paths`

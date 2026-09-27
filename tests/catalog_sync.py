@@ -126,6 +126,24 @@ class CatalogSyncTest(unittest.TestCase):
         with self.assertRaisesRegex(SYNC.VerificationError, "nome inesperado"):
             SYNC.download_snapshot(head, directory, rpc, sleep=lambda _: None)
 
+    def test_status_reports_trust_without_private_key(self):
+        release = self.release("status", 8)
+        sources = self.root / "sources.txt"
+        sources.write_text(release.as_uri() + "/\n" + release.as_uri() + "/\n")
+        pending = self.root / "pending"
+        pending.mkdir()
+        for name in ("head.json", "head.json.sig"):
+            (pending / name).write_bytes((release / name).read_bytes())
+        state = self.root / "state.json"
+        state.write_text('{"highestSequence":8}\n')
+        active = self.root / "active.json"
+        active.write_text("{}")
+        status = SYNC.catalogue_status(sources, self.public_key, state, pending, active)
+        self.assertTrue(status["configured"] and status["verified"] and status["active"])
+        self.assertEqual(status["sequence"], 8)
+        self.assertEqual(status["mirrors"], 2)
+        self.assertRegex(status["fingerprint"], r"^[0-9A-F]{4}(?::[0-9A-F]{4}){7}$")
+
 
 if __name__ == "__main__":
     unittest.main()

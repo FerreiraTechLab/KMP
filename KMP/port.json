@@ -11,8 +11,8 @@
         "porter": [
             "Kaiaum"
         ],
-        "desc": "Catálogo e instalador de homebrews redistribuíveis por BitTorrent",
-        "inst": "Instale aria2 no DarkOS. O catálogo demo está incluído; para outros conteúdos configure KMP/catalog-url.txt.",
+        "desc": "Catálogo assinado e instalador distribuído de homebrews por BitTorrent",
+        "inst": "Requer aria2 no DarkOS. Catálogos schema 2 usam mirrors HTTPS, assinatura Ed25519 e snapshots BitTorrent.",
         "genres": [
             "other"
         ],
