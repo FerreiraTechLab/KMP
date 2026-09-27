@@ -63,7 +63,16 @@ local function validateItem(item, ids, portIds, roots)
 end
 
 function Catalog.validate(document)
-    if type(document) ~= "table" or document.schemaVersion ~= 1 or type(document.items) ~= "table" then
+    if type(document) ~= "table" or type(document.items) ~= "table" then
+        return nil, "versão ou formato do catálogo inválido"
+    end
+    if document.schemaVersion == 2 then
+        if type(document.sequence) ~= "number" or document.sequence < 1 or
+           document.sequence % 1 ~= 0 or type(document.generatedAt) ~= "string" or
+           not document.generatedAt:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then
+            return nil, "metadados do catálogo 2 inválidos"
+        end
+    elseif document.schemaVersion ~= 1 then
         return nil, "versão ou formato do catálogo inválido"
     end
     local ids = {}
@@ -75,7 +84,8 @@ function Catalog.validate(document)
         if not valid then return nil, "item " .. index .. ": " .. err end
         items[#items + 1] = valid
     end
-    return items
+    return items, nil, {schemaVersion = document.schemaVersion,
+        sequence = document.sequence, generatedAt = document.generatedAt}
 end
 
 function Catalog.search(items, query)

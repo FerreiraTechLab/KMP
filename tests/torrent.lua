@@ -23,4 +23,9 @@ local status = assert(backend:status(gid, hash))
 assert(status.percent == 50 and status.downloadBytesPerSecond == 2048)
 assert(backend:status(gid, string.rep("a", 40)) == nil)
 assert(backend:stop(gid) == "OK")
+
+local peerBackend = Torrent.new(function(_, params) return params[1][1] end,
+    {peer = "192.168.1.10:6881"})
+local peerMagnet = assert(peerBackend:start({magnet = "magnet:?xt=urn:btih:" .. hash}, "/tmp/kmp"))
+assert(peerMagnet:find("&x.pe=192.168.1.10:6881", 1, true))
 print("torrent tests: ok")

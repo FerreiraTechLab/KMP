@@ -33,5 +33,16 @@ assert(Catalog.validate(document) == nil)
 document.items[2] = nil
 
 document.schemaVersion = 2
+document.sequence = 1
+document.generatedAt = "2026-09-26T23:00:00Z"
+local v2, v2err, metadata = Catalog.validate(document)
+assert(v2 and not v2err and metadata.schemaVersion == 2 and metadata.sequence == 1)
+document.sequence = 0
+assert(Catalog.validate(document) == nil)
+document.sequence = 1
+document.generatedAt = "data inválida"
+assert(Catalog.validate(document) == nil)
+document.generatedAt = "2026-09-26T23:00:00Z"
+document.schemaVersion = 3
 assert(Catalog.validate(document) == nil)
 print("catalog tests: ok")

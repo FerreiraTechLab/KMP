@@ -4,7 +4,15 @@
 
 local Json = require("json")
 local Catalog = require("catalog")
+local APP_VERSION = require("version")
 local CATALOG_URL = os.getenv("KMP_CATALOG_URL") or ""
+local CATALOG_SYNC = os.getenv("KMP_CATALOG_SYNC") or ""
+local CATALOG_SOURCES = os.getenv("KMP_CATALOG_SOURCES") or ""
+local CATALOG_PUBLIC_KEY = os.getenv("KMP_CATALOG_PUBLIC_KEY") or ""
+local CATALOG_STATE = os.getenv("KMP_CATALOG_STATE") or ""
+local CATALOG_PENDING = os.getenv("KMP_CATALOG_PENDING") or ""
+local CATALOG_DOWNLOADS = os.getenv("KMP_CATALOG_DOWNLOADS") or ""
+local CATALOG_ACTIVE = os.getenv("KMP_CATALOG_ACTIVE") or ""
 
 local sdPaths = { "/roms/ports", "/roms2/ports" }
 local sdLabels = { "SD1 (/roms)", "SD2 (/roms2)" }
@@ -155,7 +163,10 @@ function startSync()
     isOffline = false
     syncing = true
 
-    if CATALOG_URL == "" then
+    local distributed = CATALOG_SYNC ~= "" and CATALOG_SOURCES ~= "" and
+        CATALOG_PUBLIC_KEY ~= "" and CATALOG_ACTIVE ~= "" and
+        (os.getenv("KMP_ARIA2_RPC") or "") ~= ""
+    if not distributed and CATALOG_URL == "" then
         syncStatus = "Sem Catálogo"
         download.statusText = "Configure KMP/catalog-url.txt."
         download.statusColor = {1.0, 0.3, 0.3}
@@ -164,7 +175,30 @@ function startSync()
         return
     end
 
-    local savePath = isWindows() and "kpm_catalog.json" or "/tmp/kpm_catalog.json"
+    local savePath = distributed and CATALOG_ACTIVE or
+        (isWindows() and "kpm_catalog.json" or "/tmp/kpm_catalog.json")
+    if distributed then
+        local resultPath = "/tmp/kmp_catalog_sync_result.json"
+        os.remove(resultPath)
+        local sync_thread = love.thread.newThread([[
+            local script, sources, publicKey, state, pending, downloads,
+                active, endpoint, secret, resultPath = ...
+            local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
+            local command = "python3 " .. quote(script) .. " sync" ..
+                " --sources " .. quote(sources) .. " --public-key " .. quote(publicKey) ..
+                " --state " .. quote(state) .. " --pending " .. quote(pending) ..
+                " --downloads " .. quote(downloads) .. " --active " .. quote(active) ..
+                " --rpc " .. quote(endpoint) .. " --secret " .. quote(secret) ..
+                " > " .. quote(resultPath) .. " 2>&1"
+            local result = os.execute(command)
+            local ok = result == true or result == 0
+            love.thread.getChannel("sync_done"):push({distributed = true, ok = ok})
+        ]])
+        sync_thread:start(CATALOG_SYNC, CATALOG_SOURCES, CATALOG_PUBLIC_KEY,
+            CATALOG_STATE, CATALOG_PENDING, CATALOG_DOWNLOADS, CATALOG_ACTIVE,
+            os.getenv("KMP_ARIA2_RPC"), os.getenv("KMP_ARIA2_SECRET"), resultPath)
+        return
+    end
     os.remove(savePath)
 
     local sync_thread = love.thread.newThread([[
@@ -179,7 +213,7 @@ end
 
 local function decodeCatalog(content)
     if type(content) ~= "string" or #content < 5 then return nil, "servidor não retornou dados" end
-    if #content > 1024 * 1024 then return nil, "catálogo excede 1 MB" end
+    if #content > 8 * 1024 * 1024 then return nil, "catálogo excede 8 MB" end
     local head = content:sub(1, 200):lower()
     if head:find("<!doctype", 1, true) or head:find("<html", 1, true) then
         return nil, "servidor devolveu HTML"
@@ -204,15 +238,17 @@ local function saveCatalogCache(content)
     os.rename(saveDirectory .. "/catalog-cache.json.tmp", saveDirectory .. "/catalog-cache.json")
 end
 
-function finishSync()
+function finishSync(event)
     syncing = false
-    local savePath = isWindows() and "kpm_catalog.json" or "/tmp/kpm_catalog.json"
+    local distributed = type(event) == "table" and event.distributed
+    local savePath = distributed and CATALOG_ACTIVE or
+        (isWindows() and "kpm_catalog.json" or "/tmp/kpm_catalog.json")
     local file = io.open(savePath, "r")
     local content = file and file:read("*a") or nil
     if file then file:close() end
     local items, errorMessage = decodeCatalog(content)
-    local fromCache = false
-    if not items then
+    local fromCache = distributed and not event.ok or false
+    if not items and not distributed then
         local cached = love.filesystem.read("catalog-cache.json")
         items = decodeCatalog(cached)
         fromCache = items ~= nil
@@ -226,9 +262,10 @@ function finishSync()
     end
     catalogAll = items
     applySearch()
-    if not fromCache then saveCatalogCache(content) end
+    if not fromCache and not distributed then saveCatalogCache(content) end
     checkLocalFiles()
-    syncStatus = (fromCache and "Offline" or "Online") .. " (" .. #catalogAll .. " ports)"
+    local mode = distributed and "Distribuído" or "Online"
+    syncStatus = (fromCache and "Offline" or mode) .. " (" .. #catalogAll .. " ports)"
     download.statusText = fromCache and "Usando catálogo salvo." or "Lista sincronizada com sucesso!"
     download.statusColor = {0.2, 0.85, 0.45}
     isOffline = fromCache
@@ -253,9 +290,9 @@ function love.load()
         logoImg = love.graphics.newImage("logo.png")
     end
 
-    if love.filesystem.getInfo("bgm.ogg") then
+    if love.audio and love.filesystem.getInfo("bgm.ogg") then
         bgm = love.audio.newSource("bgm.ogg", "stream")
-    elseif love.filesystem.getInfo("bgm.mp3") then
+    elseif love.audio and love.filesystem.getInfo("bgm.mp3") then
         bgm = love.audio.newSource("bgm.mp3", "stream")
     end
 
@@ -272,8 +309,9 @@ function love.update(dt)
     if appState == "splash" then
         splashTimer = splashTimer + dt
         if syncing then
-            if love.thread.getChannel("sync_done"):pop() then
-                finishSync()
+            local syncEvent = love.thread.getChannel("sync_done"):pop()
+            if syncEvent then
+                finishSync(syncEvent)
             end
         else
             if splashTimer >= 2.0 then
@@ -284,8 +322,9 @@ function love.update(dt)
     end
 
     if syncing then
-        if love.thread.getChannel("sync_done"):pop() then
-            finishSync()
+        local syncEvent = love.thread.getChannel("sync_done"):pop()
+        if syncEvent then
+            finishSync(syncEvent)
         end
     end
 
@@ -380,7 +419,7 @@ local function startTorrentDownload(game)
         local cancel = love.thread.getChannel("torrent_cancel")
         local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
         local function fail(message) channel:push({kind = "error", message = message}) end
-        local backend = Torrent.new(Rpc.new(endpoint, secret))
+        local backend = Torrent.new(Rpc.new(endpoint, secret), {peer = os.getenv("KMP_PEER")})
         local gid, err = backend:start(game, directory)
         if not gid then fail(err or "aria2c não iniciou o torrent"); return end
         local lastProgress = 0
@@ -896,6 +935,9 @@ function love.draw()
         local dots = math.floor(splashTimer * 3) % 4
         local strDots = string.rep(".", dots)
         love.graphics.printf("Carregando Sistema" .. strDots, 0, 380, 640, "center")
+        love.graphics.setColor(0.45, 0.52, 0.62)
+        love.graphics.setFont(fontSub)
+        love.graphics.printf("v" .. APP_VERSION, 0, 410, 640, "center")
     
     elseif appState == "uninstaller" then
         love.graphics.setColor(1.0, 0.3, 0.3)
@@ -907,6 +949,9 @@ function love.draw()
         love.graphics.setFont(fontTitle)
         love.graphics.setColor(0.96, 0.97, 1.0)
         love.graphics.print("Gerenciador de Ports (Desinstalador)", 78, 19)
+        love.graphics.setFont(fontSub)
+        love.graphics.setColor(0.45, 0.52, 0.62)
+        love.graphics.printf("v" .. APP_VERSION, 540, 24, 76, "right")
 
         love.graphics.setColor(1, 1, 1, 0.06)
         love.graphics.line(24, 52, 616, 52)
@@ -1027,6 +1072,9 @@ function love.draw()
         love.graphics.print("KDownloader PM", 78, 19)
 
         love.graphics.setFont(fontSub)
+        love.graphics.setColor(0.45, 0.52, 0.62)
+        love.graphics.print("v" .. APP_VERSION, 220, 24)
+
         love.graphics.setColor(0.35, 0.42, 0.52)
         love.graphics.print("Destino: " .. sdLabels[currentSd], 300, 24)
 

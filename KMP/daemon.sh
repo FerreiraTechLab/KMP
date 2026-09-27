@@ -1,0 +1,126 @@
+#!/bin/bash
+set -u
+
+command_name=${1:-status}
+aria2_binary=${2:-aria2c}
+state_dir=${3:-"$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/conf/daemon"}
+download_dir=${4:-"$state_dir/downloads"}
+
+pid_file="$state_dir/pid"
+secret_file="$state_dir/rpc.secret"
+env_file="$state_dir/rpc.env"
+session_file="$state_dir/session.txt"
+log_file="$state_dir/aria2.log"
+settings_file="$state_dir/settings.conf"
+
+valid_pid() {
+  [ -f "$pid_file" ] || return 1
+  daemon_pid=$(cat "$pid_file" 2>/dev/null) || return 1
+  case "$daemon_pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$daemon_pid" 2>/dev/null || return 1
+  [ -r "/proc/$daemon_pid/cmdline" ] || return 1
+  tr '\0' ' ' < "/proc/$daemon_pid/cmdline" | grep -F -- '--enable-rpc=true' >/dev/null 2>&1
+}
+
+read_setting() {
+  setting_name=$1
+  fallback=$2
+  setting_value=""
+  if [ -f "$settings_file" ]; then
+    setting_value=$(sed -n "s/^${setting_name}=//p" "$settings_file" | tail -n 1)
+  fi
+  [ -n "$setting_value" ] && printf '%s' "$setting_value" || printf '%s' "$fallback"
+}
+
+write_env() {
+  umask 077
+  {
+    printf 'KMP_ARIA2_RPC=%s\n' "http://127.0.0.1:${rpc_port}/jsonrpc"
+    printf 'KMP_ARIA2_SECRET=%s\n' "$rpc_secret"
+  } > "$env_file.tmp"
+  mv "$env_file.tmp" "$env_file"
+}
+
+case "$command_name" in
+  start)
+    mkdir -p "$state_dir" "$download_dir"
+    chmod 700 "$state_dir"
+    touch "$session_file"
+    chmod 600 "$session_file"
+    if valid_pid; then
+      cat "$env_file"
+      exit 0
+    fi
+    rm -f "$pid_file" "$env_file"
+    if [ ! -x "$aria2_binary" ] && ! command -v "$aria2_binary" >/dev/null 2>&1; then
+      printf 'aria2c não encontrado\n' >&2
+      exit 1
+    fi
+    if [ -s "$secret_file" ]; then
+      rpc_secret=$(cat "$secret_file")
+    else
+      rpc_secret=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
+      umask 077
+      printf '%s\n' "$rpc_secret" > "$secret_file"
+    fi
+    case "$rpc_secret" in ''|*[!0-9a-f]*) printf 'segredo RPC inválido\n' >&2; exit 1 ;; esac
+    rpc_port=$(read_setting rpc_port 26801)
+    listen_port=$(read_setting listen_port 6881)
+    upload_limit=$(read_setting upload_limit 100K)
+    case "$rpc_port:$listen_port" in *[!0-9:]*) printf 'porta inválida\n' >&2; exit 1 ;; esac
+    case "$upload_limit" in *[!0-9KMGkmg]*) printf 'limite de upload inválido\n' >&2; exit 1 ;; esac
+    write_env
+    if [ -f "$log_file" ] && [ "$(wc -c < "$log_file")" -gt 1048576 ]; then
+      mv "$log_file" "$log_file.old"
+    fi
+    setsid "$aria2_binary" \
+      --enable-rpc=true --rpc-listen-all=false \
+      --rpc-listen-port="$rpc_port" --rpc-secret="$rpc_secret" \
+      --input-file="$session_file" --save-session="$session_file" \
+      --save-session-interval=30 --force-save=true \
+      --continue=true --auto-file-renaming=false --file-allocation=none \
+      --enable-dht=true --enable-peer-exchange=true --bt-enable-lpd=true \
+      --listen-port="$listen_port" --dht-listen-port="$listen_port" \
+      --seed-ratio=0 --max-overall-upload-limit="$upload_limit" \
+      --max-concurrent-downloads=2 --dir="$download_dir" \
+      --console-log-level=warn < /dev/null >> "$log_file" 2>&1 &
+    daemon_pid=$!
+    printf '%s\n' "$daemon_pid" > "$pid_file"
+    sleep 1
+    for _attempt in 1 2 3 4 5; do
+      if valid_pid; then
+        cat "$env_file"
+        exit 0
+      fi
+      sleep 1
+    done
+    printf 'daemon aria2 não iniciou; consulte %s\n' "$log_file" >&2
+    rm -f "$pid_file" "$env_file"
+    exit 1
+    ;;
+  status)
+    if valid_pid; then
+      printf 'running pid=%s\n' "$daemon_pid"
+      exit 0
+    fi
+    printf 'stopped\n'
+    exit 1
+    ;;
+  env)
+    valid_pid && cat "$env_file" || exit 1
+    ;;
+  stop)
+    if valid_pid; then
+      kill "$daemon_pid" 2>/dev/null || true
+      for _attempt in 1 2 3 4 5; do
+        kill -0 "$daemon_pid" 2>/dev/null || break
+        sleep 1
+      done
+    fi
+    rm -f "$pid_file" "$env_file"
+    ;;
+  *)
+    printf 'uso: %s {start|status|env|stop} [aria2c] [state-dir] [download-dir]\n' "$0" >&2
+    exit 2
+    ;;
+esac

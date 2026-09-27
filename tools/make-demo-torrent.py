@@ -26,7 +26,7 @@ def bencode(value):
 
 def build(output, tracker=None):
     output.mkdir(parents=True, exist_ok=True)
-    package = output / "kmp-demo.zip"
+    package = output / "kmp-demo-v1.zip"
     with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("kmp-demo.sh", "#!/bin/sh\nprintf 'KMP demo instalado\\n'\n")
         archive.writestr("kmp-demo/README.txt", "Pacote de demonstração para testar o KDownloader.\n")
@@ -53,7 +53,7 @@ def build(output, tracker=None):
     catalog = {
         "schemaVersion": 1,
         "items": [{
-            "id": "kmp-demo", "name": "KMP Demo", "version": "1.0",
+            "id": "kmp-demo-v1", "name": "KMP Demo", "version": "1.0",
             "description": "Pacote pequeno para testar o fluxo BitTorrent",
             "sizeBytes": len(payload), "license": "CC0-1.0",
             "infoHash": info_hash, "magnet": magnet,

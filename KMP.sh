@@ -12,7 +12,7 @@ else
   controlfolder="/roms/ports/PortMaster"
 fi
 
-source $controlfolder/control.txt
+source "$controlfolder/control.txt"
 
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 
@@ -21,26 +21,39 @@ get_controls
 GAMEDIR=/$directory/ports/KMP
 CONFDIR="$GAMEDIR/conf/"
 
-mkdir -p "$GAMEDIR/conf"
-cd $GAMEDIR
+mkdir -p "$GAMEDIR/conf" "$GAMEDIR/conf/.portfolder" "$HOME/.portfolder"
+cd "$GAMEDIR"
 
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
+KMP_VERSION="$(cat "$GAMEDIR/version.txt" 2>/dev/null || printf 'desconhecida')"
+printf 'KDownloader PM v%s\n' "$KMP_VERSION"
 
 # Set the XDG environment variables for config & savefiles
 export XDG_DATA_HOME="$CONFDIR"
 
-#  If XDG Path does not work
-# Use bind_directories to reroute that to a location within the ports folder.
-bind_directories ~/.portfolder $GAMEDIR/conf/.portfolder 
-
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$LD_LIBRARY_PATH"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export KMP_INSTALLER="$GAMEDIR/install.py"
+export KMP_CATALOG_SYNC="$GAMEDIR/catalog_sync.py"
+export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
+if [ -f "$GAMEDIR/catalog-sources.txt" ] && [ -f "$GAMEDIR/catalog-root.pub" ]; then
+  export KMP_CATALOG_SOURCES="$GAMEDIR/catalog-sources.txt"
+  export KMP_CATALOG_PUBLIC_KEY="$GAMEDIR/catalog-root.pub"
+  export KMP_CATALOG_STATE="$CONFDIR/catalog/state.json"
+  export KMP_CATALOG_PENDING="$CONFDIR/catalog/pending"
+  export KMP_CATALOG_DOWNLOADS="$CONFDIR/catalog/torrents"
+  export KMP_CATALOG_ACTIVE="$CONFDIR/catalog/active.json"
+fi
 if [ -f "$GAMEDIR/catalog-url.txt" ]; then
   IFS= read -r KMP_CATALOG_URL < "$GAMEDIR/catalog-url.txt"
   export KMP_CATALOG_URL
 elif [ -f "$GAMEDIR/demo/catalog-v1.json" ]; then
   export KMP_CATALOG_URL="file://$GAMEDIR/demo/catalog-v1.json"
+fi
+if [ -f "$GAMEDIR/peer.txt" ]; then
+  IFS= read -r KMP_PEER < "$GAMEDIR/peer.txt"
+  KMP_PEER="$(printf '%s' "$KMP_PEER" | tr -d '[:space:]')"
+  export KMP_PEER
 fi
 
 # Prefer a PortMaster-local BitTorrent client; fall back to the firmware package.
@@ -55,20 +68,26 @@ fi
 
 source $controlfolder/runtimes/"love_11.5"/love.txt
 
-# Keep the RPC server private to this application and stop it on exit.
+# The DarkOS image does not run a PipeWire user session. Set this after loading
+# the runtime in case love.txt changes the audio environment.
+printf '[general]\ndrivers=alsa\n' > "$CONFDIR/alsoft.conf"
+export ALSOFT_CONF="$CONFDIR/alsoft.conf"
+export ALSOFT_DRIVERS="alsa"
+
+printf 'Backend BitTorrent: %s\n' "${KMP_ARIA2:-não encontrado}"
+printf 'Peer direto: %s\n' "${KMP_PEER:-não configurado}"
+
+# Start or reuse the persistent BitTorrent daemon. It keeps completed torrents
+# seeding after the graphical interface closes.
 if [ -n "$KMP_ARIA2" ]; then
-  mkdir -p "$CONFDIR/torrent"
-  KMP_ARIA2_SECRET="$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')"
-  KMP_ARIA2_PORT=$((20000 + RANDOM % 40000))
-  export KMP_ARIA2_SECRET
-  export KMP_ARIA2_RPC="http://127.0.0.1:${KMP_ARIA2_PORT}/jsonrpc"
-  "$KMP_ARIA2" --enable-rpc=true --rpc-listen-all=false \
-    --rpc-listen-port="$KMP_ARIA2_PORT" --rpc-secret="$KMP_ARIA2_SECRET" \
-    --max-concurrent-downloads=1 --max-overall-upload-limit=100K \
-    --bt-enable-lpd=true --file-allocation=none --dir="$CONFDIR/torrent" \
-    --console-log-level=warn < /dev/null > "$CONFDIR/aria2.log" 2>&1 &
-  KMP_ARIA2_PID=$!
-  trap 'kill "$KMP_ARIA2_PID" 2>/dev/null; wait "$KMP_ARIA2_PID" 2>/dev/null' EXIT
+  if "$GAMEDIR/daemon.sh" start "$KMP_ARIA2" "$CONFDIR/daemon" "$CONFDIR/torrent" >/dev/null; then
+    set -a
+    source "$CONFDIR/daemon/rpc.env"
+    set +a
+  else
+    export KMP_ARIA2_RPC=""
+    export KMP_ARIA2_SECRET=""
+  fi
 fi
 
 # Run the love runtime

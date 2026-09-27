@@ -21,6 +21,13 @@ function Torrent:start(item, directory)
        type(directory) ~= "string" or directory == "" then
         return nil, "pacote ou destino inválido"
     end
+    local magnet = item.magnet
+    if self.settings.peer then
+        if not self.settings.peer:match("^%d+%.%d+%.%d+%.%d+:%d+$") then
+            return nil, "peer direto inválido; use IPv4:porta"
+        end
+        magnet = magnet .. "&x.pe=" .. self.settings.peer
+    end
     local options = {
         dir = directory,
         ["continue"] = "true",
@@ -30,7 +37,7 @@ function Torrent:start(item, directory)
         ["seed-time"] = tostring(self.settings.seedMinutes or 120),
         ["seed-ratio"] = tostring(self.settings.seedRatio or 1.0)
     }
-    return self.rpc("aria2.addUri", {{item.magnet}, options})
+    return self.rpc("aria2.addUri", {{magnet}, options})
 end
 
 function Torrent:status(gid, expectedHash)

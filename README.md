@@ -1,7 +1,16 @@
-# KDownloader PM v0.1
+# KDownloader PM v0.1.7
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
+
+The persistent seeding and signed distributed catalogue design for the next
+milestone is documented in [ARCHITECTURE-v0.2.md](ARCHITECTURE-v0.2.md).
+
+When `KMP/catalog-sources.txt` and `KMP/catalog-root.pub` are installed, the app
+uses the signed schema-2 flow. It discovers the newest valid head, downloads its
+single-file catalogue torrent through the persistent aria2 daemon, atomically
+activates it, and keeps the torrent available for seeding. Without those files,
+the schema-1 preview remains the migration fallback.
 
 ## Setup on the R36H
 
@@ -14,8 +23,8 @@ BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
 4. Open KMP from the Ports menu. The app starts its own local `aria2c` process
    and stops it when the app closes. It limits total upload to 100 KiB/s.
 
-`KMP.zip` in the repository is the preview package for PortMaster. Its files
-match the layout in `KMP/port.json`.
+Versioned PortMaster packages are stored in `dists/`. The current preview is
+`dists/KMP-v0.1.7.zip`; its contents match the layout in `KMP/port.json`.
 
 The catalogue contains a **single-file torrent** whose only file is the ZIP
 named by `packageFile`. The ZIP must contain exactly the declared `install.paths`
@@ -49,6 +58,9 @@ lua tests/aria2_rpc.lua
 lua tests/main_smoke.lua
 python3 tests/install.py
 python3 tests/rpc_http.py
+python3 tests/catalog_security.py
+python3 tests/catalog_sync.py
+bash tests/daemon.sh
 luac -p KMP/game/*.lua
 bash -n KMP.sh
 ```
@@ -61,17 +73,30 @@ The `demo/` folder contains a small public-domain package, its torrent, and a
 matching catalogue. To regenerate it:
 
 ```sh
-python3 tools/make-demo-torrent.py demo
+python3 tools/make-demo-torrent.py demo \
+  --tracker http://192.168.0.26:6969/announce
 ```
 
 The output contains `kmp-demo.zip`, `kmp-demo.torrent`, and `catalog-v1.json`.
-Seed the torrent from a computer with:
+Start the development tracker and seed the torrent from a computer with two
+terminals:
+
+```sh
+python3 tools/dev-tracker.py --port 6969
+```
 
 ```sh
 aria2c --check-integrity --bt-enable-lpd=true --seed-ratio=0 --seed-time=120 \
+  --listen-port=6881 --dht-listen-port=6881 \
   -d "$PWD/demo" "$PWD/demo/kmp-demo.torrent"
 ```
 
-The preview package already includes the demo catalogue. Keep the demo ZIP off
-the R36H before the test. Both peers should be on the same LAN; the app enables
-local peer discovery. The second portable can use the same preview package.
+The preview package already includes the demo catalogue. Its torrent uses the
+development tracker on `192.168.0.26:6969`, allowing aria2 to rediscover the
+seeder after completing the separate magnet metadata task. Keep the demo ZIP
+off the R36H before the test. Both peers should be on the same LAN. Run
+`hostname -I` on the seeding computer and create
+`/roms/ports/KMP/peer.txt` on the R36H containing its LAN address and port, for
+example `192.168.1.100:6881`. The app adds this direct peer to the magnet and
+also keeps local peer discovery enabled. The second portable can use the same
+preview package.

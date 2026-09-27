@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Verification primitives for signed KMP catalogue releases."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+from datetime import datetime, timedelta, timezone
+
+
+MAX_HEAD_BYTES = 32 * 1024
+MAX_CATALOG_BYTES = 8 * 1024 * 1024
+HEX64 = set("0123456789abcdef")
+SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+INFO_HASH = re.compile(r"^[0-9a-fA-F]{40}$")
+
+
+class VerificationError(ValueError):
+    pass
+
+
+def _read_limited(path: Path, limit: int) -> bytes:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise VerificationError(f"arquivo indisponível: {path}") from exc
+    if size <= 0 or size > limit:
+        raise VerificationError(f"tamanho inválido: {path}")
+    return path.read_bytes()
+
+
+def verify_signature(data: bytes, signature: bytes, public_key: Path) -> None:
+    if not public_key.is_file():
+        raise VerificationError("chave pública indisponível")
+    with tempfile.TemporaryDirectory(prefix="kmp-verify-") as temporary:
+        data_path = Path(temporary, "data")
+        signature_path = Path(temporary, "signature")
+        data_path.write_bytes(data)
+        signature_path.write_bytes(signature)
+        result = subprocess.run(
+            ["openssl", "pkeyutl", "-verify", "-pubin", "-rawin",
+             "-inkey", str(public_key), "-in", str(data_path),
+             "-sigfile", str(signature_path)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, check=False,
+        )
+    if result.returncode != 0:
+        raise VerificationError("assinatura inválida")
+
+
+def parse_time(value: object, field: str) -> datetime:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise VerificationError(f"{field} inválido")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise VerificationError(f"{field} inválido") from exc
+    return parsed.astimezone(timezone.utc)
+
+
+def validate_head(document: object, now: datetime | None = None) -> dict:
+    if not isinstance(document, dict) or document.get("schemaVersion") != 1:
+        raise VerificationError("schema do head incompatível")
+    sequence = document.get("sequence")
+    size = document.get("catalogSize")
+    digest = document.get("catalogSha256")
+    magnet = document.get("catalogMagnet")
+    encoded_signature = document.get("catalogSignature")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+        raise VerificationError("sequência inválida")
+    if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_CATALOG_BYTES:
+        raise VerificationError("tamanho do catálogo inválido")
+    if not isinstance(digest, str) or len(digest) != 64 or any(c not in HEX64 for c in digest):
+        raise VerificationError("SHA-256 do catálogo inválido")
+    if not isinstance(magnet, str) or not magnet.startswith("magnet:?xt=urn:btih:"):
+        raise VerificationError("magnet do catálogo inválido")
+    if not isinstance(encoded_signature, str):
+        raise VerificationError("assinatura do catálogo ausente")
+    try:
+        signature = base64.b64decode(encoded_signature, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise VerificationError("assinatura do catálogo inválida") from exc
+    if len(signature) != 64:
+        raise VerificationError("assinatura do catálogo inválida")
+    published = parse_time(document.get("publishedAt"), "publishedAt")
+    expires = parse_time(document.get("expiresAt"), "expiresAt")
+    now = now or datetime.now(timezone.utc)
+    if published > now + timedelta(minutes=10):
+        raise VerificationError("data de publicação está no futuro")
+    if expires <= published or expires <= now:
+        raise VerificationError("head expirado")
+    return document
+
+
+def _safe_path(value: object) -> bool:
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        return False
+    if "\\" in value or "//" in value or ":" in value or any(ord(char) < 32 for char in value):
+        return False
+    return all(part not in {".", ".."} for part in value.split("/"))
+
+
+def validate_catalog_document(document: object, sequence: int) -> None:
+    if not isinstance(document, dict) or document.get("schemaVersion") != 2:
+        raise VerificationError("schema do catálogo incompatível")
+    if document.get("sequence") != sequence:
+        raise VerificationError("sequência do catálogo não confere")
+    if not isinstance(document.get("generatedAt"), str):
+        raise VerificationError("generatedAt do catálogo inválido")
+    parse_time(document["generatedAt"], "generatedAt")
+    items = document.get("items")
+    if not isinstance(items, list):
+        raise VerificationError("itens do catálogo inválidos")
+    ids, ports, roots = set(), set(), {}
+    for index, item in enumerate(items, 1):
+        prefix = f"item {index}: "
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not SAFE_ID.fullmatch(item["id"]):
+            raise VerificationError(prefix + "id inválido")
+        if item["id"] in ids:
+            raise VerificationError(prefix + "id duplicado")
+        for field in ("name", "version", "description", "license"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                raise VerificationError(prefix + field + " ausente")
+        size = item.get("sizeBytes")
+        if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= 2**53 - 1:
+            raise VerificationError(prefix + "sizeBytes inválido")
+        info_hash = item.get("infoHash")
+        magnet = item.get("magnet")
+        if not isinstance(info_hash, str) or not INFO_HASH.fullmatch(info_hash):
+            raise VerificationError(prefix + "infoHash inválido")
+        if not isinstance(magnet, str) or not re.search(
+                r"(?:^magnet:\?xt=|[?&]xt=)urn:btih:" + re.escape(info_hash) + r"(?:&|$)",
+                magnet, re.IGNORECASE):
+            raise VerificationError(prefix + "magnet não corresponde ao infoHash")
+        package = item.get("packageFile")
+        if not _safe_path(package) or "/" in package or not package.lower().endswith(".zip"):
+            raise VerificationError(prefix + "packageFile inválido")
+        install = item.get("install")
+        if not isinstance(install, dict) or not isinstance(install.get("portId"), str) or \
+                not SAFE_ID.fullmatch(install["portId"]) or install["portId"] in ports:
+            raise VerificationError(prefix + "install inválido")
+        paths = install.get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise VerificationError(prefix + "caminhos de instalação ausentes")
+        for path in paths:
+            if not _safe_path(path):
+                raise VerificationError(prefix + "caminho de instalação inválido")
+            root = path.split("/", 1)[0]
+            if root in {".kmp", "KMP"} or (root in roots and roots[root] != item["id"]):
+                raise VerificationError(prefix + "destino compartilhado ou reservado")
+            roots[root] = item["id"]
+        ids.add(item["id"])
+        ports.add(install["portId"])
+
+
+def load_verified_head(head_path: Path, signature_path: Path,
+                       public_key: Path, now: datetime | None = None) -> dict:
+    raw = _read_limited(head_path, MAX_HEAD_BYTES)
+    signature = _read_limited(signature_path, 1024)
+    verify_signature(raw, signature, public_key)
+    try:
+        document = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VerificationError("head não é JSON válido") from exc
+    return validate_head(document, now)
+
+
+def verify_catalog(catalog_path: Path, head: dict, public_key: Path) -> bytes:
+    raw = _read_limited(catalog_path, MAX_CATALOG_BYTES)
+    if len(raw) != head["catalogSize"]:
+        raise VerificationError("tamanho do catálogo não confere")
+    if hashlib.sha256(raw).hexdigest() != head["catalogSha256"]:
+        raise VerificationError("SHA-256 do catálogo não confere")
+    signature = base64.b64decode(head["catalogSignature"], validate=True)
+    verify_signature(raw, signature, public_key)
+    try:
+        document = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VerificationError("catálogo não é JSON válido") from exc
+    validate_catalog_document(document, head["sequence"])
+    return raw
+
+
+def enforce_monotonic(sequence: int, state_path: Path) -> None:
+    previous = 0
+    if state_path.exists():
+        try:
+            state = json.loads(_read_limited(state_path, 4096))
+            previous = state["highestSequence"]
+        except (VerificationError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise VerificationError("estado de sequência inválido") from exc
+        if not isinstance(previous, int) or isinstance(previous, bool) or previous < 0:
+            raise VerificationError("estado de sequência inválido")
+    if sequence < previous:
+        raise VerificationError("catálogo rejeitado por proteção contra downgrade")
+
+
+def save_sequence(sequence: int, state_path: Path) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_path.with_name(state_path.name + ".tmp")
+    temporary.write_text(json.dumps({"highestSequence": sequence}) + "\n", encoding="utf-8")
+    os.replace(temporary, state_path)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--head", required=True, type=Path)
+    parser.add_argument("--head-signature", required=True, type=Path)
+    parser.add_argument("--catalog", required=True, type=Path)
+    parser.add_argument("--public-key", required=True, type=Path)
+    parser.add_argument("--state", required=True, type=Path)
+    args = parser.parse_args()
+    try:
+        head = load_verified_head(args.head, args.head_signature, args.public_key)
+        enforce_monotonic(head["sequence"], args.state)
+        verify_catalog(args.catalog, head, args.public_key)
+        save_sequence(head["sequence"], args.state)
+    except VerificationError as exc:
+        parser.exit(1, f"erro: {exc}\n")
+    print(f"catálogo verificado: sequência {head['sequence']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
