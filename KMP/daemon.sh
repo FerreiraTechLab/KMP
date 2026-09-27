@@ -13,7 +13,10 @@ session_file="$state_dir/session.txt"
 log_file="$state_dir/aria2.log"
 settings_file="$state_dir/settings.conf"
 version_file="$state_dir/daemon.version"
-daemon_version=2
+monitor_pid_file="$state_dir/battery-monitor.pid"
+monitor_log_file="$state_dir/battery-monitor.log"
+monitor_script="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/battery_seed.py"
+daemon_version=3
 
 valid_pid() {
   [ -f "$pid_file" ] || return 1
@@ -43,14 +46,49 @@ write_env() {
   mv "$env_file.tmp" "$env_file"
 }
 
+stop_monitor() {
+  if [ -f "$monitor_pid_file" ]; then
+    monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null || true)
+    case "$monitor_pid" in ''|*[!0-9]*) ;; *) kill "$monitor_pid" 2>/dev/null || true ;; esac
+  fi
+  rm -f "$monitor_pid_file"
+}
+
+start_monitor() {
+  if [ -f "$monitor_pid_file" ]; then
+    monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null || true)
+    case "$monitor_pid" in
+      ''|*[!0-9]*) ;;
+      *) kill -0 "$monitor_pid" 2>/dev/null && return 0 ;;
+    esac
+  fi
+  stop_monitor
+  seed_threshold=$(read_setting seed_battery_min 30)
+  case "$seed_threshold" in ''|*[!0-9]*) seed_threshold=30 ;; esac
+  setsid python3 "$monitor_script" --rpc "http://127.0.0.1:${rpc_port}/jsonrpc" \
+    --secret "$rpc_secret" --threshold "$seed_threshold" \
+    >> "$monitor_log_file" 2>&1 < /dev/null &
+  printf '%s\n' "$!" > "$monitor_pid_file"
+}
+
 case "$command_name" in
   start)
     mkdir -p "$state_dir" "$download_dir"
     chmod 700 "$state_dir"
     touch "$session_file"
     chmod 600 "$session_file"
+    if [ -s "$secret_file" ]; then
+      rpc_secret=$(cat "$secret_file")
+    else
+      rpc_secret=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
+      umask 077
+      printf '%s\n' "$rpc_secret" > "$secret_file"
+    fi
+    case "$rpc_secret" in ''|*[!0-9a-f]*) printf 'segredo RPC inválido\n' >&2; exit 1 ;; esac
+    rpc_port=$(read_setting rpc_port 26801)
     if valid_pid; then
       if [ "$(cat "$version_file" 2>/dev/null)" = "$daemon_version" ]; then
+        start_monitor
         cat "$env_file"
         exit 0
       fi
@@ -65,15 +103,6 @@ case "$command_name" in
       printf 'aria2c não encontrado\n' >&2
       exit 1
     fi
-    if [ -s "$secret_file" ]; then
-      rpc_secret=$(cat "$secret_file")
-    else
-      rpc_secret=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
-      umask 077
-      printf '%s\n' "$rpc_secret" > "$secret_file"
-    fi
-    case "$rpc_secret" in ''|*[!0-9a-f]*) printf 'segredo RPC inválido\n' >&2; exit 1 ;; esac
-    rpc_port=$(read_setting rpc_port 26801)
     listen_port=$(read_setting listen_port 6881)
     upload_limit=$(read_setting upload_limit 100K)
     case "$rpc_port:$listen_port" in *[!0-9:]*) printf 'porta inválida\n' >&2; exit 1 ;; esac
@@ -99,6 +128,7 @@ case "$command_name" in
     for _attempt in 1 2 3 4 5; do
       if valid_pid; then
         printf '%s\n' "$daemon_version" > "$version_file"
+        start_monitor
         cat "$env_file"
         exit 0
       fi
@@ -120,6 +150,7 @@ case "$command_name" in
     valid_pid && cat "$env_file" || exit 1
     ;;
   stop)
+    stop_monitor
     if valid_pid; then
       kill "$daemon_pid" 2>/dev/null || true
       for _attempt in 1 2 3 4 5; do

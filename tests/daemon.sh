@@ -19,7 +19,9 @@ chmod +x "$test_dir/fake-aria2c"
 "$repo_dir/KMP/daemon.sh" start "$test_dir/fake-aria2c" \
   "$test_dir/state" "$test_dir/downloads" > "$test_dir/first.env"
 first_pid=$(cat "$test_dir/state/pid")
+first_monitor_pid=$(cat "$test_dir/state/battery-monitor.pid")
 kill -0 "$first_pid"
+kill -0 "$first_monitor_pid"
 grep '^KMP_ARIA2_RPC=http://127.0.0.1:26801/jsonrpc$' "$test_dir/first.env" >/dev/null
 grep -E '^KMP_ARIA2_SECRET=[0-9a-f]{32}$' "$test_dir/first.env" >/dev/null
 [ "$(stat -c %a "$test_dir/state/rpc.secret")" = 600 ]
@@ -27,6 +29,7 @@ grep -E '^KMP_ARIA2_SECRET=[0-9a-f]{32}$' "$test_dir/first.env" >/dev/null
 "$repo_dir/KMP/daemon.sh" start "$test_dir/fake-aria2c" \
   "$test_dir/state" "$test_dir/downloads" > "$test_dir/second.env"
 [ "$first_pid" = "$(cat "$test_dir/state/pid")" ]
+[ "$first_monitor_pid" = "$(cat "$test_dir/state/battery-monitor.pid")" ]
 cmp "$test_dir/first.env" "$test_dir/second.env"
 "$repo_dir/KMP/daemon.sh" status "$test_dir/fake-aria2c" \
   "$test_dir/state" "$test_dir/downloads" | grep '^running pid=' >/dev/null
