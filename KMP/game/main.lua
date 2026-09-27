@@ -35,6 +35,7 @@ local searchQuery = ""
 local searchSelected = 1
 local searchChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 local showDetails = false
+local detailsSeed = {loading = false, found = false}
 local catalogTrust = {
     configured = false, verified = false, active = false, sequence = 0,
     mirrors = 0, fingerprint = "", expiresAt = "", error = ""
@@ -97,6 +98,29 @@ local function applySearch()
     catalog = Catalog.search(catalogAll, searchQuery)
     selectedIdx = 1
     scrollY = 0
+end
+
+local function startSeedStatus(game)
+    detailsSeed = {loading = false, found = false}
+    if not game or not game.installed then return end
+    local endpoint = os.getenv("KMP_ARIA2_RPC")
+    local secret = os.getenv("KMP_ARIA2_SECRET")
+    if not endpoint or endpoint == "" or not secret or secret == "" then
+        detailsSeed.error = "daemon BitTorrent indisponivel"
+        return
+    end
+    detailsSeed.loading = true
+    while love.thread.getChannel("seed_status_done"):pop() do end
+    local worker = love.thread.newThread([[
+        local endpoint, secret, infoHash = ...
+        local Rpc = require("aria2_rpc")
+        local SeedStatus = require("seed_status")
+        local ok, result, err = pcall(SeedStatus.find, Rpc.new(endpoint, secret), infoHash)
+        if not ok then result, err = nil, tostring(result) end
+        love.thread.getChannel("seed_status_done"):push(
+            result or {error = err or "status indisponivel"})
+    ]])
+    worker:start(endpoint, secret, game.infoHash)
 end
 
 local function scanInstalledPorts()
@@ -312,6 +336,13 @@ function love.load()
 end
 
 function love.update(dt)
+    if showDetails and detailsSeed.loading then
+        local seedEvent = love.thread.getChannel("seed_status_done"):pop()
+        if seedEvent then
+            detailsSeed = seedEvent
+            detailsSeed.loading = false
+        end
+    end
     if appState == "splash" then
         splashTimer = splashTimer + dt
         if syncing then
@@ -586,9 +617,8 @@ end
 local function handleActionConfirm()
     if download.active or syncing or #catalog == 0 then return end
     local game = catalog[selectedIdx]
-    if not game.installed then
-        showDetails = true
-    end
+    showDetails = true
+    startSeedStatus(game)
 end
 
 local function handleActionReload()
@@ -823,29 +853,29 @@ function love.gamepadpressed(joystick, button)
         elseif button == "dpright" then searchSelected = math.min(#searchChars, searchSelected + 1)
         elseif button == "dpup" then searchSelected = math.max(1, searchSelected - 6)
         elseif button == "dpdown" then searchSelected = math.min(#searchChars, searchSelected + 6)
-        elseif button == "b" then
+        elseif button == "a" then
             searchQuery = searchQuery .. searchChars:sub(searchSelected, searchSelected)
             applySearch()
         elseif button == "y" then
             searchQuery = searchQuery:sub(1, -2)
             applySearch()
-        elseif button == "a" or button == "back" or button == "start" then showSearch = false end
+        elseif button == "b" or button == "back" or button == "start" then showSearch = false end
         return
     end
 
     if showDetails then
-        if button == "b" then
+        if button == "a" and not catalog[selectedIdx].installed then
             showDetails = false
             startDownload(catalog[selectedIdx])
-        elseif button == "a" or button == "back" or button == "start" then showDetails = false end
+        elseif button == "b" or button == "back" or button == "start" then showDetails = false end
         return
     end
 
     if appState == "uninstaller" then
         if showUninstallPopup then
-            if button == "b" then
+            if button == "a" then
                 executeUninstall()
-            elseif button == "a" or button == "back" or button == "start" then
+            elseif button == "b" or button == "back" or button == "start" then
                 showUninstallPopup = false
                 gameToUninstall = nil
             end
@@ -854,7 +884,7 @@ function love.gamepadpressed(joystick, button)
             elseif button == "dpdown" then handleUninstallerNavDown()
             elseif button == "leftshoulder" then handleUninstallerPageUp()
             elseif button == "rightshoulder" then handleUninstallerPageDown()
-            elseif button == "b" then
+            elseif button == "a" then
                 if #installedPorts > 0 then
                     gameToUninstall = installedPorts[uninstallerSelectedIdx]
                     if gameToUninstall.managed then
@@ -863,7 +893,7 @@ function love.gamepadpressed(joystick, button)
                         uninstallError = "Port legado sem manifesto: remoção manual."
                     end
                 end
-            elseif button == "a" or button == "back" or button == "start" then
+            elseif button == "b" or button == "back" or button == "start" then
                 appState = "main"
             end
         end
@@ -877,11 +907,11 @@ function love.gamepadpressed(joystick, button)
         elseif button == "dpdown" then
             powerMenuSelected = powerMenuSelected + 1
             if powerMenuSelected > 3 then powerMenuSelected = 1 end
-        elseif button == "b" then
+        elseif button == "a" then
             if powerMenuSelected == 1 then handleActionExit()
             elseif powerMenuSelected == 2 then handleReboot()
             elseif powerMenuSelected == 3 then handleShutdown() end
-        elseif button == "a" or button == "back" or button == "start" then
+        elseif button == "b" or button == "back" or button == "start" then
             appState = "main"
             showMenu = true
         end
@@ -895,7 +925,7 @@ function love.gamepadpressed(joystick, button)
         elseif button == "dpdown" then
             menuSelected = menuSelected + 1
             if menuSelected > 5 then menuSelected = 1 end
-        elseif button == "b" then
+        elseif button == "a" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
                 showMenu = false
@@ -913,14 +943,14 @@ function love.gamepadpressed(joystick, button)
                 appState = "power_menu"
                 powerMenuSelected = 1
             end
-        elseif button == "a" or button == "back" or button == "start" then
+        elseif button == "b" or button == "back" or button == "start" then
             showMenu = false
         end
         return
     end
 
     if download.active then
-        if button == "back" or button == "start" then
+        if button == "b" or button == "back" or button == "start" then
             love.thread.getChannel("torrent_cancel"):push(true)
             download.statusText = "Interrompendo download..."
         end
@@ -932,7 +962,7 @@ function love.gamepadpressed(joystick, button)
     elseif button == "dpdown" then handleNavDown()
     elseif button == "leftshoulder" then handleNavPageUp()
     elseif button == "rightshoulder" then handleNavPageDown()
-    elseif button == "b" then handleActionConfirm()
+    elseif button == "a" then handleActionConfirm()
     elseif button == "x" then toggleMusic()
     elseif button == "y" then handleActionReload()
     elseif button == "back" or button == "start" then
@@ -1075,14 +1105,14 @@ function love.draw()
         love.graphics.setColor(0.35, 0.3, 0.1)
         love.graphics.rectangle("fill", 24, 450, 18, 18, 4, 4)
         love.graphics.setColor(0.95, 0.85, 0.2)
-        love.graphics.printf("B", 24, 453, 18, "center")
+        love.graphics.printf("A", 24, 453, 18, "center")
         love.graphics.setColor(0.40, 0.46, 0.56)
         love.graphics.print("Desinstalar", 48, 453)
 
         love.graphics.setColor(0.15, 0.25, 0.4)
         love.graphics.rectangle("fill", 150, 450, 18, 18, 4, 4)
         love.graphics.setColor(0.3, 0.6, 1.0)
-        love.graphics.printf("A", 150, 453, 18, "center")
+        love.graphics.printf("B", 150, 453, 18, "center")
         love.graphics.setColor(0.40, 0.46, 0.56)
         love.graphics.print("Voltar", 174, 453)
 
@@ -1111,7 +1141,7 @@ function love.draw()
                 120, 245, 400, "center")
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("B: Sim (Apagar)    A: Nao (Cancelar)", 120, 280, 400, "center")
+            love.graphics.printf("A: Sim (Apagar)    B: Nao (Cancelar)", 120, 280, 400, "center")
         end
 
     else
@@ -1304,11 +1334,11 @@ function love.draw()
         love.graphics.setFont(fontSub)
         love.graphics.setColor(0.40, 0.46, 0.56)
         
-        -- DETALHES (B)
+        -- DETALHES (A)
         love.graphics.setColor(0.35, 0.3, 0.1)
         love.graphics.rectangle("fill", 24, 452, 18, 18, 4, 4)
         love.graphics.setColor(0.95, 0.85, 0.2)
-        love.graphics.printf("B", 24, 455, 18, "center")
+        love.graphics.printf("A", 24, 455, 18, "center")
         love.graphics.setColor(0.40, 0.46, 0.56)
         love.graphics.print("Detalhes", 47, 455)
 
@@ -1409,7 +1439,7 @@ function love.draw()
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("B: Confirmar   A: Voltar", 170, 385, 300, "center")
+            love.graphics.printf("A: Confirmar   B: Voltar", 170, 385, 300, "center")
         end
 
         if showSearch then
@@ -1436,7 +1466,7 @@ function love.draw()
             end
             love.graphics.setFont(fontSub)
             love.graphics.setColor(0.7, 0.8, 0.9)
-            love.graphics.printf("B: letra   Y: apagar   A: voltar", 105, 410, 430, "center")
+            love.graphics.printf("A: letra   Y: apagar   B: voltar", 105, 410, 430, "center")
         end
 
         if showDetails and catalog[selectedIdx] then
@@ -1444,20 +1474,44 @@ function love.draw()
             love.graphics.setColor(0, 0, 0, 0.88)
             love.graphics.rectangle("fill", 0, 0, 640, 480)
             love.graphics.setColor(0.1, 0.15, 0.22)
-            love.graphics.rectangle("fill", 90, 100, 460, 280, 12, 12)
+            love.graphics.rectangle("fill", 70, 65, 500, 350, 12, 12)
             love.graphics.setColor(0.0, 0.82, 1.0)
             love.graphics.setFont(fontTitle)
-            love.graphics.printf(game.name, 110, 120, 420, "center")
+            love.graphics.printf(game.name, 90, 85, 460, "center")
             love.graphics.setColor(0.85, 0.9, 0.95)
             love.graphics.setFont(fontSub)
             love.graphics.printf("Versão: " .. (game.version or "-") .. "   |   Licença: " .. (game.license or "-") ..
-                "   |   Tamanho: " .. (game.size or "-"), 110, 165, 420, "center")
+                "   |   Tamanho: " .. (game.size or "-"), 90, 125, 460, "center")
             love.graphics.setFont(fontItem)
-            love.graphics.printf(game.description or "Sem descrição", 115, 205, 410, "center")
+            love.graphics.printf(game.description or "Sem descrição", 95, 160, 450, "center")
             love.graphics.setFont(fontSub)
             love.graphics.setColor(0.5, 0.6, 0.7)
-            love.graphics.printf("Destino: " .. sdLabels[currentSd], 110, 315, 420, "center")
-            love.graphics.printf("B: instalar   A: voltar", 110, 345, 420, "center")
+            love.graphics.printf("Destino: " .. sdLabels[currentSd], 90, 245, 460, "center")
+            if game.installed then
+                love.graphics.setColor(0.2, 0.85, 0.45)
+                love.graphics.printf("INSTALADO", 90, 270, 460, "center")
+                love.graphics.setColor(0.68, 0.76, 0.86)
+                local seedText = "Semeacao: consultando..."
+                if not detailsSeed.loading then
+                    if detailsSeed.error then seedText = "Semeacao: " .. detailsSeed.error
+                    elseif not detailsSeed.found then seedText = "Semeacao: torrent fora do daemon"
+                    elseif detailsSeed.seeding then seedText = "Semeacao: ativa"
+                    elseif detailsSeed.paused then seedText = "Semeacao: pausada (bateria ou usuario)"
+                    else seedText = "Semeacao: " .. tostring(detailsSeed.phase or "inativa") end
+                end
+                love.graphics.printf(seedText, 90, 298, 460, "center")
+                if detailsSeed.found then
+                    love.graphics.printf(string.format(
+                        "Enviado: %.1f MB  |  Ratio: %.2f  |  Upload: %.1f KB/s  |  Peers: %d",
+                        (detailsSeed.uploaded or 0) / 1048576, detailsSeed.ratio or 0,
+                        (detailsSeed.uploadSpeed or 0) / 1024, detailsSeed.connections or 0),
+                        85, 324, 470, "center")
+                end
+                love.graphics.setColor(0.5, 0.6, 0.7)
+                love.graphics.printf("B: voltar", 90, 380, 460, "center")
+            else
+                love.graphics.printf("A: instalar   B: voltar", 90, 380, 460, "center")
+            end
         end
 
         if appState == "catalog_trust" then
@@ -1558,7 +1612,7 @@ function love.draw()
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("B: Confirmar   A: Voltar", 170, 330, 300, "center")
+            love.graphics.printf("A: Confirmar   B: Voltar", 170, 330, 300, "center")
         end
 
         if showRestartPopup then
