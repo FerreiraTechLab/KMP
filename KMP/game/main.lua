@@ -841,7 +841,8 @@ function love.keypressed(key)
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
                 showMenu = false
-                handleActionExit()
+                appState = "power_menu"
+                powerMenuSelected = 1
             end
         elseif key == "a" or key == "space" or key == "escape" or key == "q" or key == "backspace" then
             showMenu = false
@@ -996,7 +997,8 @@ function love.gamepadpressed(joystick, button)
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
                 showMenu = false
-                handleActionExit()
+                appState = "power_menu"
+                powerMenuSelected = 1
             end
         elseif button == "b" or button == "back" or button == "start" then
             showMenu = false

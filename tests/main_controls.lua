@@ -23,5 +23,7 @@ love.update(2.1)
 love.gamepadpressed(nil, "start")
 for _ = 1, 4 do love.gamepadpressed(nil, "dpdown") end
 love.gamepadpressed(nil, "a")
-assert(quitCalled, "A deve executar a opção Sair")
+assert(not quitCalled, "Sair deve primeiro abrir o menu de energia")
+love.gamepadpressed(nil, "a")
+assert(quitCalled, "A deve confirmar Sair do Aplicativo")
 print("main controls tests: ok")
