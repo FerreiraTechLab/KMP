@@ -137,7 +137,8 @@ def discover(sources: list[str], public_key: Path, state_path: Path,
     atomic_write(pending_dir / "head.json", head_bytes)
     atomic_write(pending_dir / "head.json.sig", signature)
     return {"sequence": head["sequence"], "magnet": head["catalogMagnet"],
-            "source": source, "head": str(pending_dir / "head.json")}
+            "source": source, "head": str(pending_dir / "head.json"),
+            "healthyMirrors": len(candidates), "mirrorErrors": errors}
 
 
 def activate(head_path: Path, signature_path: Path, catalog_path: Path,
@@ -262,12 +263,14 @@ def sync_catalog(sources_path: Path, public_key: Path, state_path: Path,
 def catalogue_status(sources_path: Path, public_key: Path, state_path: Path,
                      pending_dir: Path, active_path: Path) -> dict:
     result = {"configured": False, "verified": False, "sequence": 0,
-              "mirrors": 0, "fingerprint": "", "expiresAt": "",
+              "mirrors": 0, "healthyMirrors": 0, "mirrorStatus": [],
+              "fingerprint": "", "expiresAt": "",
               "active": active_path.is_file()}
     if not sources_path.is_file() or not public_key.is_file():
         return result
     result["configured"] = True
-    result["mirrors"] = len(read_sources(sources_path))
+    sources = read_sources(sources_path)
+    result["mirrors"] = len(sources)
     digest = public_key_fingerprint(public_key).upper()
     result["fingerprint"] = ":".join(digest[index:index + 4]
                                       for index in range(0, 32, 4))
@@ -292,6 +295,24 @@ def catalogue_status(sources_path: Path, public_key: Path, state_path: Path,
             # A cached head signed by the previous key is expected immediately
             # after rotation. The active snapshot remains available.
             pass
+    with tempfile.TemporaryDirectory(prefix="kmp-mirror-status-") as directory:
+        temporary = Path(directory)
+        for index, source in enumerate(sources):
+            healthy = False
+            message = "ok"
+            try:
+                candidate = temporary / str(index)
+                candidate.mkdir()
+                head = verify_candidate(fetch(source, "head.json", MAX_HEAD_BYTES),
+                                        fetch(source, "head.json.sig", 1024),
+                                        public_key, candidate)
+                enforce_monotonic(head["sequence"], state_path)
+                healthy = True
+                result["healthyMirrors"] += 1
+            except VerificationError as exc:
+                message = str(exc)
+            result["mirrorStatus"].append({"source": source, "healthy": healthy,
+                                            "message": message})
     return result
 
 

@@ -63,11 +63,11 @@ assinatura e o cliente escolhe apenas pacotes compatíveis com o dispositivo.
 
 ### P1 — rede e mirrors
 
-- [ ] Remover ou publicar corretamente o mirror de GitHub Releases.
-- [ ] Mostrar quantidade de mirrors saudáveis, além dos configurados.
+- [x] Remover ou publicar corretamente o mirror de GitHub Releases.
+- [x] Mostrar quantidade de mirrors saudáveis, além dos configurados.
 - [ ] Medir web seed, peer local, peer remoto, ausência de seed e NAT restritivo.
 - [ ] Registrar tempo de descoberta, velocidade, CPU, memória, bateria e upload.
-- [ ] Definir comportamento e mensagem quando todos os mecanismos falharem.
+- [x] Definir comportamento e mensagem quando todos os mecanismos falharem.
 
 Critério de conclusão: uma matriz reproduzível demonstra quando o BitTorrent
 ajuda, quanto custa ao dispositivo e como o cliente degrada para HTTP.

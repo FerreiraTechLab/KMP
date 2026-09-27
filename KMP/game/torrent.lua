@@ -61,6 +61,18 @@ function Torrent:status(gid, expectedHash)
     local done = tonumber(raw.completedLength) or 0
     local phase = raw.status or "unknown"
     if phase == "active" and raw.seeder == "true" then phase = "seeding" end
+    local webSeedsConfigured = false
+    local webSeedActive = false
+    for _, file in ipairs(type(raw.files) == "table" and raw.files or {}) do
+        for _, uri in ipairs(type(file.uris) == "table" and file.uris or {}) do
+            if type(uri.uri) == "string" and uri.uri:match("^https?://") then
+                webSeedsConfigured = true
+                if uri.status == "used" then webSeedActive = true end
+            end
+        end
+    end
+    local transport = webSeedActive and "webseed" or
+        ((tonumber(raw.connections) or 0) > 0 and "peers" or "waiting")
     local result = {
         phase = phase,
         totalBytes = total,
@@ -73,7 +85,8 @@ function Torrent:status(gid, expectedHash)
         errorCode = raw.errorCode,
         errorMessage = raw.errorMessage,
         files = raw.files,
-        infoHash = hash
+        infoHash = hash, transport = transport,
+        webSeedsConfigured = webSeedsConfigured
     }
     if phase == "complete" and not hash then
         return nil, "transferência concluída sem metadados BitTorrent"

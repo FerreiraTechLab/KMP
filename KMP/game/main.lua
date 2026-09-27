@@ -38,7 +38,7 @@ local showDetails = false
 local detailsSeed = {loading = false, found = false}
 local catalogTrust = {
     configured = false, verified = false, active = false, sequence = 0,
-    mirrors = 0, fingerprint = "", expiresAt = "", error = ""
+    mirrors = 0, healthyMirrors = 0, fingerprint = "", expiresAt = "", error = ""
 }
 
 local showRestartPopup = false
@@ -427,8 +427,10 @@ function love.update(dt)
             download.speedBps = torrentEvent.speed or 0
             download.downloadedBytes = torrentEvent.done or 0
             download.totalBytes = torrentEvent.total or 0
-            download.statusText = torrentEvent.waiting and "Procurando peers..." or
-                string.format("Baixando %s... (%d%%)", download.game.name, download.progress)
+            local route = torrentEvent.transport == "webseed" and "mirror HTTPS" or
+                (torrentEvent.transport == "peers" and "peers" or nil)
+            download.statusText = torrentEvent.waiting and "Procurando fontes..." or
+                string.format("Baixando via %s... (%d%%)", route or "rede", download.progress)
             download.statusColor = {0.0, 0.82, 1.0}
         elseif torrentEvent.kind == "installing" then
             download.phase = "extraindo"
@@ -508,6 +510,7 @@ local function startTorrentDownload(game)
         if not gid then fail(err or "aria2c não iniciou o torrent"); return end
         local lastProgress = 0
         local lastActivity = love.timer.getTime()
+        local lastState = nil
         while true do
             if cancel:pop() then
                 backend:stop(gid)
@@ -521,6 +524,7 @@ local function startTorrentDownload(game)
                 love.timer.sleep(1)
             end
             if not state then fail(statusError or "falha de rede"); return end
+            lastState = state
             if state.nextGid then
                 gid = state.nextGid
             elseif state.phase == "error" or state.phase == "removed" then
@@ -557,13 +561,20 @@ local function startTorrentDownload(game)
                     lastActivity = love.timer.getTime()
                 elseif love.timer.getTime() - lastActivity > 180 then
                     backend:stop(gid)
-                    fail("nenhum peer disponível por 3 minutos")
+                    if lastState.totalBytes == 0 then
+                        fail("Metadados indisponiveis: nenhum peer encontrado por DHT ou tracker.")
+                    elseif lastState.webSeedsConfigured then
+                        fail("Mirrors HTTPS e peers ficaram indisponiveis por 3 minutos.")
+                    else
+                        fail("Nenhum peer alcancavel; verifique NAT, firewall ou seeds ativos.")
+                    end
                     return
                 end
                 channel:push({kind = "progress", percent = state.percent,
                     speed = state.downloadBytesPerSecond, done = state.downloadedBytes,
                     total = state.totalBytes,
-                    waiting = state.totalBytes == 0 or state.connections == 0})
+                    waiting = state.totalBytes == 0 or state.transport == "waiting",
+                    transport = state.transport})
             end
             love.timer.sleep(1)
         end
@@ -614,7 +625,8 @@ end
 
 local function loadCatalogTrust()
     catalogTrust = {configured = false, verified = false, active = false,
-        sequence = 0, mirrors = 0, fingerprint = "", expiresAt = "", error = ""}
+        sequence = 0, mirrors = 0, healthyMirrors = 0,
+        fingerprint = "", expiresAt = "", error = ""}
     if CATALOG_SYNC == "" or CATALOG_SOURCES == "" or CATALOG_PUBLIC_KEY == "" then
         return
     end
@@ -1601,8 +1613,9 @@ function love.draw()
             local sequence = tonumber(catalogTrust.sequence) or 0
             love.graphics.print("Sequencia aceita:", 105, 175)
             love.graphics.printf(tostring(sequence), 310, 175, 220, "right")
-            love.graphics.print("Mirrors configurados:", 105, 207)
-            love.graphics.printf(tostring(catalogTrust.mirrors or 0), 310, 207, 220, "right")
+            love.graphics.print("Mirrors saudaveis/configurados:", 105, 207)
+            love.graphics.printf(string.format("%d/%d", tonumber(catalogTrust.healthyMirrors) or 0,
+                tonumber(catalogTrust.mirrors) or 0), 310, 207, 220, "right")
             love.graphics.print("Snapshot ativo:", 105, 239)
             love.graphics.printf(catalogTrust.active and "sim" or "nao", 310, 239, 220, "right")
             love.graphics.print("Validade do head:", 105, 271)

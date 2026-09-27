@@ -57,6 +57,7 @@ class CatalogSyncTest(unittest.TestCase):
         result = SYNC.discover([invalid.as_uri() + "/", lower.as_uri() + "/",
                                 higher.as_uri() + "/"], self.public_key, state, pending)
         self.assertEqual(result["sequence"], 8)
+        self.assertEqual(result["healthyMirrors"], 2)
         active = self.root / "active.json"
         activated = SYNC.activate(pending / "head.json", pending / "head.json.sig",
             higher / "catalog-00000008.json", self.public_key, state, active)
@@ -161,6 +162,7 @@ class CatalogSyncTest(unittest.TestCase):
         self.assertTrue(status["configured"] and status["verified"] and status["active"])
         self.assertEqual(status["sequence"], 8)
         self.assertEqual(status["mirrors"], 2)
+        self.assertEqual(status["healthyMirrors"], 2)
         self.assertRegex(status["fingerprint"], r"^[0-9A-F]{4}(?::[0-9A-F]{4}){7}$")
 
     def test_rotates_key_only_after_catalog_activation(self):

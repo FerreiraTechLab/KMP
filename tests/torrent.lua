@@ -9,7 +9,8 @@ local backend = Torrent.new(function(method, params)
         return {
             status = "active", totalLength = "1024", completedLength = "512",
             downloadSpeed = "2048", uploadSpeed = "128",
-            infoHash = hash
+            infoHash = hash, connections = "1",
+            files = {{uris = {{uri = "https://mirror.example/game.zip", status = "used"}}}}
         }
     end
     return "OK"
@@ -21,6 +22,7 @@ assert(calls[1].method == "aria2.addUri")
 assert(calls[1].params[2]["max-upload-limit"] == "100K")
 local status = assert(backend:status(gid, hash))
 assert(status.percent == 50 and status.downloadBytesPerSecond == 2048)
+assert(status.transport == "webseed" and status.webSeedsConfigured)
 
 assert(backend:start({
     magnet = "magnet:?xt=urn:btih:" .. hash,
