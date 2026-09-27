@@ -1,0 +1,18 @@
+name: Catalog contract
+
+on:
+  push:
+    paths: ["catalog/**", "schemas/**", "tools/catalog-release.py"]
+  pull_request:
+    paths: ["catalog/**", "schemas/**", "tools/catalog-release.py"]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install check-jsonschema==0.33.3
+      - run: check-jsonschema --schemafile schemas/catalog-v2.schema.json catalog/catalog-*.json

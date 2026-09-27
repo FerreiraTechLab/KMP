@@ -103,6 +103,13 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.base / "example").exists())
         self.assertEqual(module.recover(self.base), [])
 
+    def test_rejects_package_with_wrong_sha256(self):
+        self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})
+        self.item["packageSha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "SHA-256 do pacote não confere"):
+            module.install(self.package, self.base, self.item)
+        self.assertFalse((self.base / "example.sh").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

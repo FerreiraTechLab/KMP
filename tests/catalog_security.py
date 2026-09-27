@@ -123,6 +123,20 @@ class CatalogSecurityTest(unittest.TestCase):
         with self.assertRaisesRegex(SECURITY.VerificationError, "relógio"):
             SECURITY.validate_clock(trusted - timedelta(days=1), state)
 
+    def test_package_hash_is_required_from_sequence_three(self):
+        document = json.loads(self.catalog.read_text())
+        document["sequence"] = 3
+        document["items"] = [{
+            "id": "example", "name": "Example", "version": "1", "description": "Demo",
+            "license": "MIT", "sizeBytes": 1, "infoHash": "a" * 40,
+            "magnet": "magnet:?xt=urn:btih:" + "a" * 40, "packageFile": "example.zip",
+            "install": {"portId": "example", "paths": ["example.sh"]},
+        }]
+        with self.assertRaisesRegex(SECURITY.VerificationError, "packageSha256"):
+            SECURITY.validate_catalog_document(document, 3)
+        document["items"][0]["packageSha256"] = "b" * 64
+        SECURITY.validate_catalog_document(document, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -47,6 +47,12 @@ def main() -> int:
     sequence = document.get("sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         parser.error("sequence precisa ser um inteiro positivo")
+    if sequence >= 3:
+        for index, item in enumerate(document.get("items", []), 1):
+            digest = item.get("packageSha256") if isinstance(item, dict) else None
+            if not isinstance(digest, str) or len(digest) != 64 or any(
+                    char not in "0123456789abcdef" for char in digest):
+                parser.error(f"item {index}: packageSha256 obrigatório desde a sequência 3")
     if not args.magnet.startswith("magnet:?xt=urn:btih:"):
         parser.error("magnet inválido")
     if not args.private_key.is_file():

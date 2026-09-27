@@ -52,11 +52,11 @@ snapshot aceito quando for seguro.
 
 ### P1 — contrato formal do catálogo
 
-- [ ] Publicar um JSON Schema para o catálogo e para o head.
-- [ ] Executar a validação no CI do KMP Catalog.
-- [ ] Adicionar `packageSha256` a cada pacote.
+- [x] Publicar um JSON Schema para o catálogo e para o head.
+- [x] Executar a validação no CI do KMP Catalog.
+- [x] Adicionar `packageSha256` a cada pacote.
 - [ ] Preparar variantes por firmware, arquitetura e requisitos de hardware.
-- [ ] Manter compatibilidade explícita com o schema 2 durante a migração.
+- [x] Manter compatibilidade explícita com o schema 2 durante a migração.
 
 Critério de conclusão: uma proposta inválida é rejeitada antes de chegar à
 assinatura e o cliente escolhe apenas pacotes compatíveis com o dispositivo.

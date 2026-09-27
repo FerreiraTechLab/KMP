@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install a validated KMP ZIP without trusting paths inside the archive."""
 
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -168,6 +169,17 @@ def install(zip_path, base_path, item, checkpoint=None):
         raise ValueError("diretório de ports não existe")
     if zip_path.is_symlink() or not zip_path.is_file() or zip_path.name != item["packageFile"]:
         raise ValueError("pacote baixado ausente ou com nome inesperado")
+    expected_digest = item.get("packageSha256")
+    if expected_digest is not None:
+        if not isinstance(expected_digest, str) or len(expected_digest) != 64 or any(
+                char not in "0123456789abcdef" for char in expected_digest):
+            raise ValueError("SHA-256 do pacote inválido")
+        digest = hashlib.sha256()
+        with zip_path.open("rb") as package_handle:
+            for chunk in iter(lambda: package_handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_digest:
+            raise ValueError("SHA-256 do pacote não confere")
     port_id = item["install"]["portId"]
     if not port_id or not all(c.islower() or c.isdigit() or c in "_-" for c in port_id):
         raise ValueError("identificador do port inválido")

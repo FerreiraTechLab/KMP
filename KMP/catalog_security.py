@@ -198,6 +198,15 @@ def validate_catalog_document(document: object, sequence: int) -> None:
         package = item.get("packageFile")
         if not _safe_path(package) or "/" in package or not package.lower().endswith(".zip"):
             raise VerificationError(prefix + "packageFile inválido")
+        package_digest = item.get("packageSha256")
+        if sequence >= 3 and (not isinstance(package_digest, str) or
+                              len(package_digest) != 64 or
+                              any(c not in HEX64 for c in package_digest)):
+            raise VerificationError(prefix + "packageSha256 inválido ou ausente")
+        if package_digest is not None and (not isinstance(package_digest, str) or
+                                           len(package_digest) != 64 or
+                                           any(c not in HEX64 for c in package_digest)):
+            raise VerificationError(prefix + "packageSha256 inválido")
         install = item.get("install")
         if not isinstance(install, dict) or not isinstance(install.get("portId"), str) or \
                 not SAFE_ID.fullmatch(install["portId"]) or install["portId"] in ports:

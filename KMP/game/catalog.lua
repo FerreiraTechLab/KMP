@@ -18,7 +18,7 @@ local function safePath(value)
     return true
 end
 
-local function validateItem(item, ids, portIds, roots)
+local function validateItem(item, ids, portIds, roots, requirePackageHash)
     if type(item) ~= "table" then return nil, "item não é um objeto" end
     if not safeId(item.id) then return nil, "id inválido" end
     if ids[item.id] then return nil, "id duplicado: " .. item.id end
@@ -49,6 +49,11 @@ local function validateItem(item, ids, portIds, roots)
     if not safePath(item.packageFile) or item.packageFile:find("/", 1, true) or
        not item.packageFile:lower():match("%.zip$") then
         return nil, "packageFile inválido"
+    end
+    if (requirePackageHash or item.packageSha256 ~= nil) and
+       (type(item.packageSha256) ~= "string" or #item.packageSha256 ~= 64 or
+        not item.packageSha256:match("^[0-9a-f]+$")) then
+        return nil, "packageSha256 inválido ou ausente"
     end
     if type(item.install) ~= "table" or not safeId(item.install.portId) or
        type(item.install.paths) ~= "table" or #item.install.paths == 0 then
@@ -85,7 +90,8 @@ function Catalog.validate(document)
     local roots = {}
     local items = {}
     for index, item in ipairs(document.items) do
-        local valid, err = validateItem(item, ids, portIds, roots)
+        local valid, err = validateItem(item, ids, portIds, roots,
+            document.schemaVersion == 2 and document.sequence >= 3)
         if not valid then return nil, "item " .. index .. ": " .. err end
         items[#items + 1] = valid
     end

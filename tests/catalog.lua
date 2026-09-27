@@ -43,6 +43,10 @@ document.sequence = 1
 document.generatedAt = "data inválida"
 assert(Catalog.validate(document) == nil)
 document.generatedAt = "2026-09-26T23:00:00Z"
+document.sequence = 3
+assert(Catalog.validate(document) == nil)
+document.items[1].packageSha256 = string.rep("a", 64)
+assert(Catalog.validate(document) ~= nil)
 document.schemaVersion = 3
 assert(Catalog.validate(document) == nil)
 print("catalog tests: ok")
