@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.14
+# KDownloader PM v0.2.15
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
@@ -24,7 +24,7 @@ existing console seeder.
    default total upload limit is 100 KiB/s.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.14.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.15.zip`; its contents match the layout in `KMP/port.json`.
 
 Catalogue key rotation, offline backup, and recovery procedures are documented
 in `docs/CATALOG-KEYS.md`.
@@ -36,6 +36,9 @@ The trust screen probes every configured catalogue mirror and reports healthy
 versus configured endpoints. During downloads the UI identifies peer or HTTPS
 web-seed traffic and gives separate errors for missing metadata, unavailable
 mirrors, and peers blocked by NAT or firewall rules.
+
+Reproducible network captures use `KMP/network_metrics.py`; the five-scenario
+procedure and recorded fields are documented in `docs/NETWORK-MATRIX.md`.
 
 The catalogue contains a **single-file torrent** whose only file is the ZIP
 named by `packageFile`. The ZIP must contain exactly the declared `install.paths`

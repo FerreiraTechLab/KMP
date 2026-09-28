@@ -110,6 +110,7 @@ def verify_candidate(head_bytes: bytes, signature: bytes, public_key: Path,
 
 def discover(sources: list[str], public_key: Path, state_path: Path,
              pending_dir: Path) -> dict:
+    discovery_started = time.monotonic()
     validate_clock(datetime.now(timezone.utc), state_path)
     candidates = []
     errors = []
@@ -138,7 +139,8 @@ def discover(sources: list[str], public_key: Path, state_path: Path,
     atomic_write(pending_dir / "head.json.sig", signature)
     return {"sequence": head["sequence"], "magnet": head["catalogMagnet"],
             "source": source, "head": str(pending_dir / "head.json"),
-            "healthyMirrors": len(candidates), "mirrorErrors": errors}
+            "healthyMirrors": len(candidates), "mirrorErrors": errors,
+            "discoveryMs": round((time.monotonic() - discovery_started) * 1000)}
 
 
 def activate(head_path: Path, signature_path: Path, catalog_path: Path,

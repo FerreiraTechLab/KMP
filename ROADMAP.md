@@ -65,8 +65,8 @@ assinatura e o cliente escolhe apenas pacotes compatíveis com o dispositivo.
 
 - [x] Remover ou publicar corretamente o mirror de GitHub Releases.
 - [x] Mostrar quantidade de mirrors saudáveis, além dos configurados.
-- [ ] Medir web seed, peer local, peer remoto, ausência de seed e NAT restritivo.
-- [ ] Registrar tempo de descoberta, velocidade, CPU, memória, bateria e upload.
+- [x] Medir web seed, peer local, peer remoto, ausência de seed e NAT restritivo.
+- [x] Registrar tempo de descoberta, velocidade, CPU, memória, bateria e upload.
 - [x] Definir comportamento e mensagem quando todos os mecanismos falharem.
 
 Critério de conclusão: uma matriz reproduzível demonstra quando o BitTorrent

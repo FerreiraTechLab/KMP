@@ -58,6 +58,7 @@ class CatalogSyncTest(unittest.TestCase):
                                 higher.as_uri() + "/"], self.public_key, state, pending)
         self.assertEqual(result["sequence"], 8)
         self.assertEqual(result["healthyMirrors"], 2)
+        self.assertGreaterEqual(result["discoveryMs"], 0)
         active = self.root / "active.json"
         activated = SYNC.activate(pending / "head.json", pending / "head.json.sig",
             higher / "catalog-00000008.json", self.public_key, state, active)
