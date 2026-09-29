@@ -4,6 +4,8 @@ local hash = "0123456789abcdef0123456789abcdef01234567"
 local calls = {}
 local backend = Torrent.new(function(method, params)
     calls[#calls + 1] = {method = method, params = params}
+    if method == "aria2.tellActive" or method == "aria2.tellWaiting" or
+       method == "aria2.tellStopped" then return {} end
     if method == "aria2.addUri" then return "abcdef1234567890" end
     if method == "aria2.tellStatus" then
         return {
@@ -33,7 +35,33 @@ assert(require("json").encode(calls[#calls].params[2]) == "[]")
 assert(backend:status(gid, string.rep("a", 40)) == nil)
 assert(backend:stop(gid) == "OK")
 
-local peerBackend = Torrent.new(function(_, params) return params[1][1] end,
+local reused = Torrent.new(function(method, params)
+    if method == "aria2.tellActive" then
+        return {{gid = "feed1234", status = "active", infoHash = hash}}
+    end
+    if method == "aria2.tellWaiting" or method == "aria2.tellStopped" then return {} end
+    error("torrent existente não deveria ser cadastrado novamente: " .. method)
+end)
+local reusedGid, reusedError, wasReused = reused:start(
+    {magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash}, "/tmp/kmp")
+assert(reusedGid == "feed1234" and not reusedError and wasReused)
+
+local resumed = false
+local paused = Torrent.new(function(method, params)
+    if method == "aria2.tellActive" then return {} end
+    if method == "aria2.tellWaiting" then
+        return {{gid = "dead1234", status = "paused", infoHash = hash}}
+    end
+    if method == "aria2.unpause" then resumed = params[1]; return "OK" end
+    return {}
+end)
+assert(paused:start({magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash}, "/tmp/kmp") == "dead1234")
+assert(resumed == "dead1234")
+
+local peerBackend = Torrent.new(function(method, params)
+    if method:match("^aria2%.tell") then return {} end
+    return params[1][1]
+end,
     {peer = "192.168.1.10:6881"})
 local peerMagnet = assert(peerBackend:start({magnet = "magnet:?xt=urn:btih:" .. hash}, "/tmp/kmp"))
 assert(peerMagnet:find("&x.pe=192.168.1.10:6881", 1, true))

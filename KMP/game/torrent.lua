@@ -17,11 +17,46 @@ function Torrent.new(rpc, settings)
     return setmetatable({rpc = rpc, settings = settings}, Torrent)
 end
 
+function Torrent:find(expectedHash)
+    if type(expectedHash) ~= "string" or not expectedHash:match("^[0-9a-fA-F]+$") then
+        return nil
+    end
+    local keys = {"gid", "status", "infoHash"}
+    local groups = {
+        {"aria2.tellActive", {keys}},
+        {"aria2.tellWaiting", {0, 1000, keys}},
+        {"aria2.tellStopped", {0, 1000, keys}},
+    }
+    for _, query in ipairs(groups) do
+        local items = self.rpc(query[1], query[2])
+        if type(items) == "table" then
+            for _, item in ipairs(items) do
+                if type(item.infoHash) == "string" and
+                   item.infoHash:lower() == expectedHash:lower() and
+                   type(item.gid) == "string" and item.gid:match("^[0-9a-fA-F]+$") then
+                    if item.status == "paused" then
+                        local resumed, err = self.rpc("aria2.unpause", {item.gid})
+                        if resumed == nil then return nil, err or "não foi possível retomar o torrent" end
+                    elseif item.status == "error" or item.status == "removed" then
+                        self.rpc("aria2.removeDownloadResult", {item.gid})
+                        return nil
+                    end
+                    return item.gid, nil, true
+                end
+            end
+        end
+    end
+    return nil
+end
+
 function Torrent:start(item, directory)
     if type(item) ~= "table" or type(item.magnet) ~= "string" or
        type(directory) ~= "string" or directory == "" then
         return nil, "pacote ou destino inválido"
     end
+    local existing, findError, reused = self:find(item.infoHash)
+    if findError then return nil, findError end
+    if existing then return existing, nil, reused end
     local magnet = item.magnet
     if self.settings.peer then
         if not self.settings.peer:match("^%d+%.%d+%.%d+%.%d+:%d+$") then
