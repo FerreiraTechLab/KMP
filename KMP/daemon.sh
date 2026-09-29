@@ -16,6 +16,10 @@ version_file="$state_dir/daemon.version"
 monitor_pid_file="$state_dir/battery-monitor.pid"
 monitor_log_file="$state_dir/battery-monitor.log"
 monitor_script="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/battery_seed.py"
+python_binary=${KMP_PYTHON:-}
+if [ -z "$python_binary" ]; then
+  python_binary=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
+fi
 daemon_version=4
 
 valid_pid() {
@@ -55,6 +59,7 @@ stop_monitor() {
 }
 
 start_monitor() {
+  [ -n "$python_binary" ] || return 0
   if [ -f "$monitor_pid_file" ]; then
     monitor_pid=$(cat "$monitor_pid_file" 2>/dev/null || true)
     case "$monitor_pid" in
@@ -65,7 +70,7 @@ start_monitor() {
   stop_monitor
   seed_threshold=$(read_setting seed_battery_min 30)
   case "$seed_threshold" in ''|*[!0-9]*) seed_threshold=30 ;; esac
-  setsid python3 "$monitor_script" --rpc "http://127.0.0.1:${rpc_port}/jsonrpc" \
+  setsid "$python_binary" "$monitor_script" --rpc "http://127.0.0.1:${rpc_port}/jsonrpc" \
     --secret "$rpc_secret" --threshold "$seed_threshold" \
     --state "$state_dir/battery-paused.json" \
     >> "$monitor_log_file" 2>&1 < /dev/null &

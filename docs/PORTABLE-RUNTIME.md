@@ -9,7 +9,7 @@ do PortMaster, ferramentas específicas do port ficam em `KMP/libs.<arch>/`.
 | Componente | Origem | Estratégia |
 | --- | --- | --- |
 | `aria2c` | KMP | binário estático fixado e verificado em `libs.aarch64/` |
-| Python 3 | firmware/PortMaster | usado pelos validadores e instalador |
+| Python 3 | firmware/PortMaster | detecta os comandos `python3` e `python` |
 | `curl` | firmware/PortMaster | transporte local do RPC na interface LÖVE |
 | `openssl` | firmware | verificação Ed25519 do catálogo |
 | LÖVE 11.5 | runtime PortMaster | montado pelo launcher existente |

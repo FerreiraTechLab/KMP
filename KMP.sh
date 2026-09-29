@@ -37,10 +37,19 @@ export KMP_INSTALLER="$GAMEDIR/install.py"
 export KMP_CATALOG_SYNC="$GAMEDIR/catalog_sync.py"
 export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
 
+if command -v python3 >/dev/null 2>&1; then
+  export KMP_PYTHON="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  export KMP_PYTHON="$(command -v python)"
+else
+  export KMP_PYTHON=""
+  printf 'Python 3 não encontrado; catálogo e instalação indisponíveis.\n' >&2
+fi
+
 # Finish or roll back installations interrupted by a previous power loss.
 for recovery_root in /roms/ports /roms2/ports; do
-  if [ -d "$recovery_root" ]; then
-    python3 "$KMP_INSTALLER" recover "$recovery_root" || \
+  if [ -n "$KMP_PYTHON" ] && [ -d "$recovery_root" ]; then
+    "$KMP_PYTHON" "$KMP_INSTALLER" recover "$recovery_root" || \
       printf 'Falha ao recuperar instalações em %s\n' "$recovery_root" >&2
   fi
 done
@@ -94,6 +103,7 @@ export ALSOFT_CONF="$CONFDIR/alsoft.conf"
 export ALSOFT_DRIVERS="alsa"
 
 printf 'Backend BitTorrent: %s\n' "${KMP_ARIA2:-não encontrado}"
+printf 'Python: %s\n' "${KMP_PYTHON:-não encontrado}"
 printf 'Peer direto: %s\n' "${KMP_PEER:-não configurado}"
 
 # Start or reuse the persistent BitTorrent daemon. It keeps completed torrents

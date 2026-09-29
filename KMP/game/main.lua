@@ -13,6 +13,7 @@ local CATALOG_STATE = os.getenv("KMP_CATALOG_STATE") or ""
 local CATALOG_PENDING = os.getenv("KMP_CATALOG_PENDING") or ""
 local CATALOG_DOWNLOADS = os.getenv("KMP_CATALOG_DOWNLOADS") or ""
 local CATALOG_ACTIVE = os.getenv("KMP_CATALOG_ACTIVE") or ""
+local PYTHON = os.getenv("KMP_PYTHON") or "python3"
 
 local sdPaths = { "/roms/ports", "/roms2/ports" }
 local sdLabels = { "SD1 (/roms)", "SD2 (/roms2)" }
@@ -224,7 +225,7 @@ function startSync()
 
     local distributed = CATALOG_SYNC ~= "" and CATALOG_SOURCES ~= "" and
         CATALOG_PUBLIC_KEY ~= "" and CATALOG_ACTIVE ~= "" and
-        (os.getenv("KMP_ARIA2_RPC") or "") ~= ""
+        (os.getenv("KMP_ARIA2_RPC") or "") ~= "" and PYTHON ~= ""
     if not distributed and CATALOG_URL == "" then
         syncStatus = "Sem Catálogo"
         download.statusText = "Configure KMP/catalog-url.txt."
@@ -240,10 +241,10 @@ function startSync()
         local resultPath = "/tmp/kmp_catalog_sync_result.json"
         os.remove(resultPath)
         local sync_thread = love.thread.newThread([[
-            local script, sources, publicKey, state, pending, downloads,
+            local python, script, sources, publicKey, state, pending, downloads,
                 active, endpoint, secret, resultPath = ...
             local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
-            local command = "python3 " .. quote(script) .. " sync" ..
+            local command = quote(python) .. " " .. quote(script) .. " sync" ..
                 " --sources " .. quote(sources) .. " --public-key " .. quote(publicKey) ..
                 " --state " .. quote(state) .. " --pending " .. quote(pending) ..
                 " --downloads " .. quote(downloads) .. " --active " .. quote(active) ..
@@ -253,7 +254,7 @@ function startSync()
             local ok = result == true or result == 0
             love.thread.getChannel("sync_done"):push({distributed = true, ok = ok})
         ]])
-        sync_thread:start(CATALOG_SYNC, CATALOG_SOURCES, CATALOG_PUBLIC_KEY,
+        sync_thread:start(PYTHON, CATALOG_SYNC, CATALOG_SOURCES, CATALOG_PUBLIC_KEY,
             CATALOG_STATE, CATALOG_PENDING, CATALOG_DOWNLOADS, CATALOG_ACTIVE,
             os.getenv("KMP_ARIA2_RPC"), os.getenv("KMP_ARIA2_SECRET"), resultPath)
         return
@@ -465,7 +466,7 @@ local function startTorrentDownload(game)
     local endpoint = os.getenv("KMP_ARIA2_RPC")
     local secret = os.getenv("KMP_ARIA2_SECRET")
     local installer = os.getenv("KMP_INSTALLER")
-    if not endpoint or not secret or not installer or isWindows() then
+    if not endpoint or not secret or not installer or PYTHON == "" or isWindows() then
         download.statusText = "BitTorrent indisponível neste dispositivo."
         download.statusColor = {1.0, 0.3, 0.3}
         return
@@ -496,7 +497,7 @@ local function startTorrentDownload(game)
     while love.thread.getChannel("torrent_cancel"):pop() do end
 
     local worker = love.thread.newThread([[
-        local game, basePorts, directory, endpoint, secret, installer = ...
+        local python, game, basePorts, directory, endpoint, secret, installer = ...
         require("love.timer")
         local Json = require("json")
         local Rpc = require("aria2_rpc")
@@ -545,7 +546,7 @@ local function startTorrentDownload(game)
                 if not handle then fail("não foi possível registrar o pacote"); return end
                 handle:write(Json.encode(game))
                 handle:close()
-                local command = "python3 " .. quote(installer) .. " install " ..
+                local command = quote(python) .. " " .. quote(installer) .. " install " ..
                     quote(directory .. "/" .. game.packageFile) .. " " ..
                     quote(basePorts) .. " " .. quote(itemFile) .. " 2>&1"
                 local process = io.popen(command)
@@ -579,7 +580,7 @@ local function startTorrentDownload(game)
             love.timer.sleep(1)
         end
     ]])
-    worker:start(game, basePorts, directory, endpoint, secret, installer)
+    worker:start(PYTHON, game, basePorts, directory, endpoint, secret, installer)
 end
 
 function love.threaderror(thread, errorMessage)
@@ -627,10 +628,10 @@ local function loadCatalogTrust()
     catalogTrust = {configured = false, verified = false, active = false,
         sequence = 0, mirrors = 0, healthyMirrors = 0,
         fingerprint = "", expiresAt = "", error = ""}
-    if CATALOG_SYNC == "" or CATALOG_SOURCES == "" or CATALOG_PUBLIC_KEY == "" then
+    if PYTHON == "" or CATALOG_SYNC == "" or CATALOG_SOURCES == "" or CATALOG_PUBLIC_KEY == "" then
         return
     end
-    local command = "python3 " .. shellQuote(CATALOG_SYNC) .. " status" ..
+    local command = shellQuote(PYTHON) .. " " .. shellQuote(CATALOG_SYNC) .. " status" ..
         " --sources " .. shellQuote(CATALOG_SOURCES) ..
         " --public-key " .. shellQuote(CATALOG_PUBLIC_KEY) ..
         " --state " .. shellQuote(CATALOG_STATE) ..
@@ -717,7 +718,7 @@ local function executeUninstall()
             if not installer then
                 uninstallError = "Instalador indisponível."
             else
-                local command = "python3 " .. shellQuote(installer) .. " uninstall " ..
+                local command = shellQuote(PYTHON) .. " " .. shellQuote(installer) .. " uninstall " ..
                     shellQuote(gameToUninstall.path) .. " " .. shellQuote(gameToUninstall.portId) .. " 2>&1"
                 local process = io.popen(command)
                 local output = process and process:read("*a") or "Instalador indisponível"
