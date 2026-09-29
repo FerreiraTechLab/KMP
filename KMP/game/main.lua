@@ -432,7 +432,12 @@ function love.update(dt)
 
     local torrentEvent = love.thread.getChannel("torrent_event"):pop()
     if torrentEvent and download.active then
-        if torrentEvent.kind == "cached" then
+        if torrentEvent.kind == "peer_test" then
+            download.phase = "p2p"
+            download.progress = 0
+            download.statusText = "Teste P2P: removendo o pacote local e desativando HTTPS..."
+            download.statusColor = {0.95, 0.7, 0.2}
+        elseif torrentEvent.kind == "cached" then
             download.phase = "cache"
             download.progress = 100
             download.statusText = "Arquivo já baixado; verificando para reinstalar..."
@@ -484,7 +489,7 @@ local function shellQuote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
-local function startTorrentDownload(game)
+local function startTorrentDownload(game, peerOnly)
     local endpoint = os.getenv("KMP_ARIA2_RPC")
     local secret = os.getenv("KMP_ARIA2_SECRET")
     local installer = os.getenv("KMP_INSTALLER")
@@ -519,7 +524,7 @@ local function startTorrentDownload(game)
     while love.thread.getChannel("torrent_cancel"):pop() do end
 
     local worker = love.thread.newThread([[
-        local python, game, basePorts, directory, endpoint, secret, installer = ...
+        local python, game, basePorts, directory, endpoint, secret, installer, peerOnly = ...
         require("love.timer")
         local Json = require("json")
         local Rpc = require("aria2_rpc")
@@ -528,7 +533,18 @@ local function startTorrentDownload(game)
         local cancel = love.thread.getChannel("torrent_cancel")
         local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
         local function fail(message) channel:push({kind = "error", message = message}) end
-        local backend = Torrent.new(Rpc.new(endpoint, secret), {peer = os.getenv("KMP_PEER")})
+        local backend = Torrent.new(Rpc.new(endpoint, secret),
+            {peer = os.getenv("KMP_PEER"), peerOnly = peerOnly})
+        if peerOnly then
+            channel:push({kind = "peer_test"})
+            local forgotten, forgetError = backend:forget(game.infoHash)
+            if not forgotten then fail(forgetError or "não foi possível limpar o cache"); return end
+            love.timer.sleep(0.5)
+            forgotten, forgetError = backend:forget(game.infoHash)
+            if not forgotten then fail(forgetError or "não foi possível remover o torrent anterior"); return end
+            os.remove(directory .. "/" .. game.packageFile)
+            os.remove(directory .. "/" .. game.packageFile .. ".aria2")
+        end
         local gid, err, reused = backend:start(game, directory)
         if not gid then fail(err or "aria2c não iniciou o torrent"); return end
         channel:push({kind = reused and "cached" or "started"})
@@ -616,7 +632,7 @@ local function startTorrentDownload(game)
             love.timer.sleep(1)
         end
     ]])
-    worker:start(PYTHON, game, basePorts, directory, endpoint, secret, installer)
+    worker:start(PYTHON, game, basePorts, directory, endpoint, secret, installer, peerOnly == true)
 end
 
 function love.threaderror(thread, errorMessage)
@@ -627,9 +643,9 @@ function love.threaderror(thread, errorMessage)
     download.statusColor = {1.0, 0.3, 0.3}
 end
 
-function startDownload(game)
+function startDownload(game, peerOnly)
     if not game or download.active or game.installed then return end
-    return startTorrentDownload(game)
+    return startTorrentDownload(game, peerOnly == true)
 end
 
 local function handleToggleSD()
@@ -827,6 +843,9 @@ function love.keypressed(key)
             showDetails = false
             startDownload(game)
         elseif key == "x" and game.installed then startSeedAction("pause_all", game)
+        elseif key == "x" then
+            showDetails = false
+            startDownload(game, true)
         elseif key == "y" and game.installed then startSeedAction("resume_all", game)
         elseif key == "b" or key == "space" or key == "escape" or key == "backspace" then
             showDetails = false
@@ -984,6 +1003,9 @@ function love.gamepadpressed(joystick, button)
             startDownload(game)
         elseif button == "x" and game.installed then
             startSeedAction("pause_all", game)
+        elseif button == "x" then
+            showDetails = false
+            startDownload(game, true)
         elseif button == "y" and game.installed then
             startSeedAction("resume_all", game)
         elseif button == "b" or button == "back" or button == "start" then showDetails = false end
@@ -1390,6 +1412,8 @@ function love.draw()
             love.graphics.setFont(fontTitle)
             if download.phase == "baixando" then
                 love.graphics.printf("BAIXANDO PORT...", 120, 170, 400, "center")
+            elseif download.phase == "p2p" then
+                love.graphics.printf("PREPARANDO TESTE P2P...", 120, 170, 400, "center")
             elseif download.phase == "cache" then
                 love.graphics.printf("REUTILIZANDO DOWNLOAD...", 120, 170, 400, "center")
             elseif download.phase == "conectando" then
@@ -1409,6 +1433,9 @@ function love.draw()
             if download.phase == "baixando" then
                 love.graphics.setColor(0.0, 0.82, 1.0)
                 love.graphics.rectangle("fill", 150, 245, 340 * (download.progress / 100), 16, 8, 8)
+            elseif download.phase == "p2p" then
+                love.graphics.setColor(0.95, 0.7, 0.2)
+                love.graphics.rectangle("fill", 150, 245, 34, 16, 8, 8)
             elseif download.phase == "cache" then
                 love.graphics.setColor(0.2, 0.75, 1.0)
                 love.graphics.rectangle("fill", 150, 245, 340, 16, 8, 8)
@@ -1421,7 +1448,9 @@ function love.draw()
             love.graphics.setFont(fontSub)
             
             local infoText = ""
-            if download.phase == "baixando" then
+            if download.phase == "p2p" then
+                infoText = "Apagando o ZIP local; mirrors HTTPS desativados."
+            elseif download.phase == "baixando" then
                 local speedStr = "0 KB/s"
                 if download.speedBps then
                     if download.speedBps > 1024 * 1024 then
@@ -1644,7 +1673,8 @@ function love.draw()
                 love.graphics.printf("Atualização automática a cada 2s   |   B: voltar",
                     90, 382, 460, "center")
             else
-                love.graphics.printf("A: instalar   B: voltar", 90, 380, 460, "center")
+                love.graphics.printf("A: instalar/cache   X: teste P2P sem HTTPS   B: voltar",
+                    70, 380, 500, "center")
             end
         end
 

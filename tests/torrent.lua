@@ -65,4 +65,30 @@ end,
     {peer = "192.168.1.10:6881"})
 local peerMagnet = assert(peerBackend:start({magnet = "magnet:?xt=urn:btih:" .. hash}, "/tmp/kmp"))
 assert(peerMagnet:find("&x.pe=192.168.1.10:6881", 1, true))
+
+local peerOnlyMethod
+local peerOnly = Torrent.new(function(method, params)
+    if method:match("^aria2%.tell") then return {} end
+    peerOnlyMethod = method
+    return params[1][1]
+end, {peer = "192.168.1.10:6881", peerOnly = true})
+local peerOnlyMagnet = assert(peerOnly:start({
+    magnet = "magnet:?xt=urn:btih:" .. hash .. "&ws=https%3A%2F%2Fmirror.example%2Fgame.zip",
+    torrent = "ZDQ6aW5mb2Rl", infoHash = hash
+}, "/tmp/kmp"))
+assert(peerOnlyMethod == "aria2.addUri")
+assert(not peerOnlyMagnet:find("&ws=", 1, true))
+assert(peerOnlyMagnet:find("&x.pe=192.168.1.10:6881", 1, true))
+
+local forgottenGid
+local forgetBackend = Torrent.new(function(method, params)
+    if method == "aria2.tellActive" then
+        return {{gid = "face1234", status = "active", infoHash = hash}}
+    end
+    if method == "aria2.tellWaiting" or method == "aria2.tellStopped" then return {} end
+    if method == "aria2.forceRemove" then forgottenGid = params[1]; return "OK" end
+    error("RPC inesperado: " .. method)
+end)
+assert(forgetBackend:forget(hash))
+assert(forgottenGid == "face1234")
 print("torrent tests: ok")

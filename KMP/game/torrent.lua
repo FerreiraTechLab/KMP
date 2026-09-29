@@ -49,6 +49,34 @@ function Torrent:find(expectedHash)
     return nil
 end
 
+function Torrent:forget(expectedHash)
+    if type(expectedHash) ~= "string" or not expectedHash:match("^[0-9a-fA-F]+$") then
+        return nil, "infoHash inválido"
+    end
+    local keys = {"gid", "status", "infoHash"}
+    local groups = {
+        {"aria2.tellActive", {keys}},
+        {"aria2.tellWaiting", {0, 1000, keys}},
+        {"aria2.tellStopped", {0, 1000, keys}},
+    }
+    for _, query in ipairs(groups) do
+        local items, err = self.rpc(query[1], query[2])
+        if items == nil then return nil, err or "falha ao consultar torrents" end
+        for _, item in ipairs(type(items) == "table" and items or {}) do
+            if type(item.infoHash) == "string" and
+               item.infoHash:lower() == expectedHash:lower() and type(item.gid) == "string" then
+                if item.status == "active" or item.status == "waiting" or item.status == "paused" then
+                    local removed, removeError = self.rpc("aria2.forceRemove", {item.gid})
+                    if removed == nil then return nil, removeError or "falha ao remover torrent anterior" end
+                else
+                    self.rpc("aria2.removeDownloadResult", {item.gid})
+                end
+            end
+        end
+    end
+    return true
+end
+
 function Torrent:start(item, directory)
     if type(item) ~= "table" or type(item.magnet) ~= "string" or
        type(directory) ~= "string" or directory == "" then
@@ -58,6 +86,9 @@ function Torrent:start(item, directory)
     if findError then return nil, findError end
     if existing then return existing, nil, reused end
     local magnet = item.magnet
+    if self.settings.peerOnly then
+        magnet = magnet:gsub("&ws=[^&]*", "")
+    end
     if self.settings.peer then
         if not self.settings.peer:match("^%d+%.%d+%.%d+%.%d+:%d+$") then
             return nil, "peer direto inválido; use IPv4:porta"
@@ -73,7 +104,7 @@ function Torrent:start(item, directory)
         ["seed-time"] = tostring(self.settings.seedMinutes or 120),
         ["seed-ratio"] = tostring(self.settings.seedRatio or 1.0)
     }
-    if type(item.torrent) == "string" and item.torrent ~= "" then
+    if not self.settings.peerOnly and type(item.torrent) == "string" and item.torrent ~= "" then
         return self.rpc("aria2.addTorrent", {item.torrent, Json.array(), options})
     end
     return self.rpc("aria2.addUri", {{magnet}, options})
