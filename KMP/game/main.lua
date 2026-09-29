@@ -444,7 +444,9 @@ function love.update(dt)
             download.statusColor = {0.2, 0.75, 1.0}
         elseif torrentEvent.kind == "started" then
             download.phase = "conectando"
-            download.statusText = "Torrent iniciado; procurando fontes..."
+            download.statusText = download.peerOnly and
+                "Teste P2P iniciado; procurando somente outros consoles..." or
+                "Torrent iniciado; procurando fontes..."
             download.statusColor = {0.0, 0.82, 1.0}
         elseif torrentEvent.kind == "progress" then
             download.phase = "baixando"
@@ -500,6 +502,10 @@ local function startTorrentDownload(game, peerOnly)
     end
     local basePorts = sdPaths[currentSd]
     local directory = basePorts .. "/.kmp/torrents/" .. game.id
+    if peerOnly then
+        directory = basePorts .. "/.kmp/p2p-tests/" .. game.id .. "-" ..
+            tostring(os.time()) .. "-" .. tostring(math.floor(love.timer.getTime() * 1000))
+    end
     local df = io.popen("df -Pk " .. shellQuote(basePorts) .. " 2>/dev/null | tail -1")
     local line = df and df:read("*l") or ""
     if df then df:close() end
@@ -519,6 +525,7 @@ local function startTorrentDownload(game, peerOnly)
     download.progress = 0
     download.speedBps = 0
     download.game = game
+    download.peerOnly = peerOnly == true
     download.statusText = "Procurando peers..."
     download.statusColor = {0.0, 0.82, 1.0}
     while love.thread.getChannel("torrent_cancel"):pop() do end
@@ -534,7 +541,8 @@ local function startTorrentDownload(game, peerOnly)
         local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
         local function fail(message) channel:push({kind = "error", message = message}) end
         local backend = Torrent.new(Rpc.new(endpoint, secret),
-            {peer = os.getenv("KMP_PEER"), peerOnly = peerOnly})
+            {peer = os.getenv("KMP_PEER"), peerOnly = peerOnly,
+             downloadLimit = peerOnly and "1M" or nil})
         if peerOnly then
             channel:push({kind = "peer_test"})
             local forgotten, forgetError = backend:forget(game.infoHash)
@@ -542,8 +550,6 @@ local function startTorrentDownload(game, peerOnly)
             love.timer.sleep(0.5)
             forgotten, forgetError = backend:forget(game.infoHash)
             if not forgotten then fail(forgetError or "não foi possível remover o torrent anterior"); return end
-            os.remove(directory .. "/" .. game.packageFile)
-            os.remove(directory .. "/" .. game.packageFile .. ".aria2")
         end
         local gid, err, reused = backend:start(game, directory)
         if not gid then fail(err or "aria2c não iniciou o torrent"); return end
@@ -1469,7 +1475,9 @@ function love.draw()
             elseif download.phase == "cache" then
                 infoText = "Usando o ZIP local e conferindo integridade."
             elseif download.phase == "conectando" then
-                infoText = "Consultando web seeds, DHT, trackers e peers locais."
+                infoText = download.peerOnly and
+                    "HTTPS bloqueado; procurando peers via rede local, DHT e trackers." or
+                    "Consultando web seeds, DHT, trackers e peers locais."
             else
                 infoText = "Download verificado; preparando instalação."
             end

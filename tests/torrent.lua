@@ -80,6 +80,16 @@ assert(peerOnlyMethod == "aria2.addUri")
 assert(not peerOnlyMagnet:find("&ws=", 1, true))
 assert(peerOnlyMagnet:find("&x.pe=192.168.1.10:6881", 1, true))
 
+local limitedOptions
+local limitedPeerOnly = Torrent.new(function(method, params)
+    if method:match("^aria2%.tell") then return {} end
+    limitedOptions = params[2]
+    return "cafe1234"
+end, {peerOnly = true, downloadLimit = "1M"})
+assert(limitedPeerOnly:start({magnet = "magnet:?xt=urn:btih:" .. hash,
+    infoHash = hash}, "/tmp/kmp"))
+assert(limitedOptions["max-download-limit"] == "1M")
+
 local forgottenGid
 local forgetBackend = Torrent.new(function(method, params)
     if method == "aria2.tellActive" then

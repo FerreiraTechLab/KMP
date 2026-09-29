@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.22
+# KDownloader PM v0.2.23
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -27,10 +27,12 @@ To validate a console-to-console transfer, open an uninstalled port's details
 and press **X**. This test removes that package from the receiving console,
 unregisters its previous torrent, and disables HTTPS web seeds for the new
 transfer. It can then receive data only from BitTorrent peers discovered by a
-direct peer setting, the local network, DHT, or trackers.
+direct peer setting, the local network, DHT, or trackers. Each test uses a new,
+empty directory and caps the receiving speed at 1 MiB/s so its progress and
+peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.22.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.23.zip`; its contents match the layout in `KMP/port.json`.
 
 The portable dependency policy and reproducible download procedure are in
 `docs/PORTABLE-RUNTIME.md`.

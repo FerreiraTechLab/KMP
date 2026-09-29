@@ -104,6 +104,9 @@ function Torrent:start(item, directory)
         ["seed-time"] = tostring(self.settings.seedMinutes or 120),
         ["seed-ratio"] = tostring(self.settings.seedRatio or 1.0)
     }
+    if self.settings.downloadLimit then
+        options["max-download-limit"] = self.settings.downloadLimit
+    end
     if not self.settings.peerOnly and type(item.torrent) == "string" and item.torrent ~= "" then
         return self.rpc("aria2.addTorrent", {item.torrent, Json.array(), options})
     end
