@@ -71,8 +71,9 @@ function Torrent:status(gid, expectedHash)
             end
         end
     end
-    local transport = webSeedActive and "webseed" or
-        ((tonumber(raw.connections) or 0) > 0 and "peers" or "waiting")
+    local connections = tonumber(raw.connections) or 0
+    local transport = webSeedActive and connections > 0 and "hybrid" or
+        (webSeedActive and "webseed" or (connections > 0 and "peers" or "waiting"))
     local result = {
         phase = phase,
         totalBytes = total,
@@ -80,7 +81,7 @@ function Torrent:status(gid, expectedHash)
         percent = total > 0 and math.min(100, math.floor(done * 100 / total)) or 0,
         downloadBytesPerSecond = tonumber(raw.downloadSpeed) or 0,
         uploadBytesPerSecond = tonumber(raw.uploadSpeed) or 0,
-        connections = tonumber(raw.connections) or 0,
+        connections = connections,
         seeders = tonumber(raw.numSeeders) or 0,
         errorCode = raw.errorCode,
         errorMessage = raw.errorMessage,

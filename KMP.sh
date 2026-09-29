@@ -49,8 +49,12 @@ fi
 # Finish or roll back installations interrupted by a previous power loss.
 for recovery_root in /roms/ports /roms2/ports; do
   if [ -n "$KMP_PYTHON" ] && [ -d "$recovery_root" ]; then
-    "$KMP_PYTHON" "$KMP_INSTALLER" recover "$recovery_root" || \
+    recovery_result=$("$KMP_PYTHON" "$KMP_INSTALLER" recover "$recovery_root") || {
       printf 'Falha ao recuperar instalações em %s\n' "$recovery_root" >&2
+      continue
+    }
+    [ "$recovery_result" = "[]" ] || \
+      printf 'Instalações recuperadas em %s: %s\n' "$recovery_root" "$recovery_result"
   fi
 done
 if [ -f "$GAMEDIR/catalog-sources.txt" ] && [ -f "$GAMEDIR/catalog-root.pub" ]; then

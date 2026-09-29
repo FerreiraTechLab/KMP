@@ -428,8 +428,11 @@ function love.update(dt)
             download.speedBps = torrentEvent.speed or 0
             download.downloadedBytes = torrentEvent.done or 0
             download.totalBytes = torrentEvent.total or 0
-            local route = torrentEvent.transport == "webseed" and "mirror HTTPS" or
-                (torrentEvent.transport == "peers" and "peers" or nil)
+            local route = torrentEvent.transport == "hybrid" and
+                string.format("HTTPS + %d peer(s)", torrentEvent.connections or 0) or
+                (torrentEvent.transport == "webseed" and "mirror HTTPS" or
+                (torrentEvent.transport == "peers" and
+                    string.format("%d peer(s)", torrentEvent.connections or 0) or nil))
             download.statusText = torrentEvent.waiting and "Procurando fontes..." or
                 string.format("Baixando via %s... (%d%%)", route or "rede", download.progress)
             download.statusColor = {0.0, 0.82, 1.0}
@@ -575,7 +578,7 @@ local function startTorrentDownload(game)
                     speed = state.downloadBytesPerSecond, done = state.downloadedBytes,
                     total = state.totalBytes,
                     waiting = state.totalBytes == 0 or state.transport == "waiting",
-                    transport = state.transport})
+                    transport = state.transport, connections = state.connections})
             end
             love.timer.sleep(1)
         end

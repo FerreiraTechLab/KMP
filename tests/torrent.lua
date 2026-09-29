@@ -22,7 +22,7 @@ assert(calls[1].method == "aria2.addUri")
 assert(calls[1].params[2]["max-upload-limit"] == "100K")
 local status = assert(backend:status(gid, hash))
 assert(status.percent == 50 and status.downloadBytesPerSecond == 2048)
-assert(status.transport == "webseed" and status.webSeedsConfigured)
+assert(status.transport == "hybrid" and status.webSeedsConfigured)
 
 assert(backend:start({
     magnet = "magnet:?xt=urn:btih:" .. hash,
