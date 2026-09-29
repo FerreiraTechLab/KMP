@@ -74,6 +74,8 @@ function Torrent:forget(expectedHash)
             end
         end
     end
+    local saved, saveError = self.rpc("aria2.saveSession", {})
+    if saved == nil then return nil, saveError or "falha ao persistir remoção do torrent" end
     return true
 end
 

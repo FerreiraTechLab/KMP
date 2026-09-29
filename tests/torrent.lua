@@ -97,6 +97,7 @@ local forgetBackend = Torrent.new(function(method, params)
     end
     if method == "aria2.tellWaiting" or method == "aria2.tellStopped" then return {} end
     if method == "aria2.forceRemove" then forgottenGid = params[1]; return "OK" end
+    if method == "aria2.saveSession" then return "OK" end
     error("RPC inesperado: " .. method)
 end)
 assert(forgetBackend:forget(hash))

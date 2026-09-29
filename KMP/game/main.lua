@@ -182,6 +182,8 @@ local function scanInstalledPorts()
                         path = basePath,
                         label = label,
                         portId = record.portId,
+                        itemId = record.id,
+                        infoHash = record.infoHash,
                         managed = true
                     })
                 end
@@ -778,6 +780,30 @@ local function executeUninstall()
             if not installer then
                 uninstallError = "Instalador indisponível."
             else
+                local endpoint = os.getenv("KMP_ARIA2_RPC")
+                local secret = os.getenv("KMP_ARIA2_SECRET")
+                if type(gameToUninstall.infoHash) ~= "string" or not endpoint or not secret then
+                    uninstallError = "Daemon BitTorrent indisponível; remoção completa cancelada."
+                    showUninstallPopup = false
+                    gameToUninstall = nil
+                    return
+                end
+                local ok, forgotten, forgetError = pcall(function()
+                    local Rpc = require("aria2_rpc")
+                    local Torrent = require("torrent")
+                    local backend = Torrent.new(Rpc.new(endpoint, secret))
+                    local removed, err = backend:forget(gameToUninstall.infoHash)
+                    if not removed then return nil, err end
+                    love.timer.sleep(0.5)
+                    return backend:forget(gameToUninstall.infoHash)
+                end)
+                if not ok or not forgotten then
+                    uninstallError = (forgetError or forgotten or
+                        "não foi possível remover a semeação"):sub(1, 100)
+                    showUninstallPopup = false
+                    gameToUninstall = nil
+                    return
+                end
                 local uninstallCommand = shellQuote(PYTHON) .. " " .. shellQuote(installer) ..
                     " uninstall " .. shellQuote(gameToUninstall.path) .. " " ..
                     shellQuote(gameToUninstall.portId)
@@ -1284,7 +1310,7 @@ function love.draw()
             love.graphics.printf("Apagar " .. gameToUninstall.name .. "?", 120, 215, 400, "center")
             love.graphics.setColor(0.75, 0.82, 0.92)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("Os arquivos instalados serao apagados de " .. gameToUninstall.label .. ".",
+            love.graphics.printf("Port, saves, cache e semeacao serao apagados de " .. gameToUninstall.label .. ".",
                 120, 245, 400, "center")
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)

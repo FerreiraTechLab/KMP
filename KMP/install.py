@@ -299,38 +299,36 @@ def uninstall(base_path, port_id):
         raise ValueError("manifesto não corresponde ao port")
     files = record.get("files", [])
     roots = record.get("roots", [])
+    item_id = record.get("id")
     if not isinstance(files, list) or not isinstance(roots, list) or any(
         not safe_relative(name) for name in files + roots
     ):
         raise ValueError("manifesto contém caminhos inválidos")
-    for name in files:
-        path = checked_path(base, name)
-        if path.is_file():
-            path.unlink()
-    directories = set(roots)
-    for name in files:
-        parent = PurePosixPath(name).parent
-        while str(parent) != ".":
-            directories.add(str(parent))
-            parent = parent.parent
-    for name in sorted(directories, key=lambda entry: entry.count("/"), reverse=True):
-        path = checked_path(base, name)
-        if path.is_dir():
-            try:
-                path.rmdir()
-            except OSError:
-                pass  # Conteúdo adicionado pelo usuário permanece no lugar.
-    preserved_dir = base / ".kmp" / "preserved" / port_id
+    if not isinstance(item_id, str) or not item_id or not all(
+            c.islower() or c.isdigit() or c in "_-" for c in item_id):
+        raise ValueError("identificador do item inválido no manifesto")
+    # Complete removal is intentional: package files, saves, settings and any
+    # user-created content below a declared port root are all deleted.
     for root in roots:
-        path = checked_path(base, root)
-        if path.is_dir():
-            preserved_target = preserved_dir / root
-            if preserved_target.exists() or preserved_target.is_symlink():
-                raise ValueError("já existem saves preservados para: " + root)
-            preserved_target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(path, preserved_target)
-            fsync_directory(base)
+        if "/" in root:
+            raise ValueError("raiz inválida no manifesto")
+        path = base / root
+        if path.exists() or path.is_symlink():
+            remove_path(path)
+    preserved_dir = base / ".kmp" / "preserved" / port_id
+    if preserved_dir.exists() or preserved_dir.is_symlink():
+        remove_path(preserved_dir)
+    torrent_dir = base / ".kmp" / "torrents" / item_id
+    if torrent_dir.exists() or torrent_dir.is_symlink():
+        remove_path(torrent_dir)
+    p2p_root = base / ".kmp" / "p2p-tests"
+    if p2p_root.is_symlink():
+        raise ValueError("diretório de testes P2P inválido")
+    if p2p_root.is_dir():
+        for test_dir in p2p_root.glob(item_id + "-*"):
+            remove_path(test_dir)
     manifest.unlink()
+    fsync_directory(base)
 
 
 def main():

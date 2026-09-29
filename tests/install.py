@@ -41,7 +41,8 @@ class InstallTests(unittest.TestCase):
         (self.base / "example" / "user.txt").write_text("keep")
         module.uninstall(self.base, "example")
         self.assertFalse((self.base / "example.sh").exists())
-        self.assertEqual((self.base / ".kmp/preserved/example/example/user.txt").read_text(), "keep")
+        self.assertFalse((self.base / "example").exists())
+        self.assertFalse((self.base / ".kmp/preserved/example").exists())
         self.assertFalse(manifest.exists())
 
     def test_reject_escape_without_writing(self):
@@ -110,22 +111,25 @@ class InstallTests(unittest.TestCase):
             module.install(self.package, self.base, self.item)
         self.assertFalse((self.base / "example.sh").exists())
 
-    def test_uninstall_preserves_user_data_and_reinstall_restores_it(self):
+    def test_uninstall_removes_saves_downloads_and_p2p_tests(self):
         self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})
         module.install(self.package, self.base, self.item)
         save = self.base / "example/conf/save.json"
         save.parent.mkdir()
         save.write_text("progress")
+        torrent = self.base / ".kmp/torrents/example/example.zip"
+        torrent.parent.mkdir(parents=True)
+        torrent.write_text("package")
+        p2p = self.base / ".kmp/p2p-tests/example-123/example.zip"
+        p2p.parent.mkdir(parents=True)
+        p2p.write_text("package")
 
         module.uninstall(self.base, "example")
-        preserved = self.base / ".kmp/preserved/example/example/conf/save.json"
-        self.assertEqual(preserved.read_text(), "progress")
         self.assertFalse((self.base / "example").exists())
-
-        module.install(self.package, self.base, self.item)
-        self.assertEqual(save.read_text(), "progress")
-        self.assertEqual((self.base / "example/data.txt").read_text(), "data")
-        self.assertTrue((self.base / ".kmp/manifests/example.json").is_file())
+        self.assertFalse((self.base / ".kmp/preserved/example").exists())
+        self.assertFalse((self.base / ".kmp/torrents/example").exists())
+        self.assertFalse((self.base / ".kmp/p2p-tests/example-123").exists())
+        self.assertFalse((self.base / ".kmp/manifests/example.json").exists())
 
     def test_reinstall_adopts_save_directory_left_by_older_client(self):
         self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})
