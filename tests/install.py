@@ -41,7 +41,7 @@ class InstallTests(unittest.TestCase):
         (self.base / "example" / "user.txt").write_text("keep")
         module.uninstall(self.base, "example")
         self.assertFalse((self.base / "example.sh").exists())
-        self.assertTrue((self.base / "example" / "user.txt").exists())
+        self.assertEqual((self.base / ".kmp/preserved/example/example/user.txt").read_text(), "keep")
         self.assertFalse(manifest.exists())
 
     def test_reject_escape_without_writing(self):
@@ -109,6 +109,32 @@ class InstallTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHA-256 do pacote não confere"):
             module.install(self.package, self.base, self.item)
         self.assertFalse((self.base / "example.sh").exists())
+
+    def test_uninstall_preserves_user_data_and_reinstall_restores_it(self):
+        self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})
+        module.install(self.package, self.base, self.item)
+        save = self.base / "example/conf/save.json"
+        save.parent.mkdir()
+        save.write_text("progress")
+
+        module.uninstall(self.base, "example")
+        preserved = self.base / ".kmp/preserved/example/example/conf/save.json"
+        self.assertEqual(preserved.read_text(), "progress")
+        self.assertFalse((self.base / "example").exists())
+
+        module.install(self.package, self.base, self.item)
+        self.assertEqual(save.read_text(), "progress")
+        self.assertEqual((self.base / "example/data.txt").read_text(), "data")
+        self.assertTrue((self.base / ".kmp/manifests/example.json").is_file())
+
+    def test_reinstall_adopts_save_directory_left_by_older_client(self):
+        self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})
+        save = self.base / "example/conf/save.json"
+        save.parent.mkdir(parents=True)
+        save.write_text("legacy progress")
+        module.install(self.package, self.base, self.item)
+        self.assertEqual(save.read_text(), "legacy progress")
+        self.assertEqual((self.base / "example/data.txt").read_text(), "data")
 
 
 if __name__ == "__main__":

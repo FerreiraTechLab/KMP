@@ -50,6 +50,27 @@ def remove_path(path):
         shutil.rmtree(path)
 
 
+def merge_preserved(source, destination):
+    """Restore preserved user files without replacing package-owned files."""
+    if not source.exists():
+        return
+    destination.mkdir(parents=True, exist_ok=True)
+    for child in list(source.iterdir()):
+        target = destination / child.name
+        if child.is_dir() and not child.is_symlink():
+            merge_preserved(child, target)
+            try:
+                child.rmdir()
+            except OSError:
+                pass
+        elif not target.exists() and not target.is_symlink():
+            os.replace(child, target)
+    try:
+        source.rmdir()
+    except OSError:
+        pass
+
+
 def validate_transaction(base, transaction):
     if not isinstance(transaction, dict) or transaction.get("schemaVersion") != 1:
         raise ValueError("journal de instalação inválido")
@@ -200,9 +221,22 @@ def install(zip_path, base_path, item, checkpoint=None):
         if shutil.disk_usage(base).free < unpacked_bytes + 64 * 1024 * 1024:
             raise ValueError("espaço insuficiente para extrair o ZIP")
         roots = sorted({path.split("/")[0] for path in item["install"]["paths"]})
+        directory_roots = {path.rstrip("/").split("/")[0]
+                           for path in item["install"]["paths"] if path.endswith("/")}
+        preserved_dir = kmp_dir / "preserved" / port_id
+        if preserved_dir.is_symlink():
+            raise ValueError("diretório de saves preservados inválido")
         for root in roots:
-            if (base / root).exists():
-                raise ValueError("destino já ocupado: " + root)
+            target = base / root
+            if target.exists():
+                if root not in directory_roots or not target.is_dir() or target.is_symlink():
+                    raise ValueError("destino já ocupado: " + root)
+                preserved_target = preserved_dir / root
+                if preserved_target.exists() or preserved_target.is_symlink():
+                    raise ValueError("já existem saves preservados para: " + root)
+                preserved_target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(target, preserved_target)
+                fsync_directory(base)
         stage = Path(tempfile.mkdtemp(prefix=".kmp-stage-", dir=base))
         manifest_dir.mkdir(parents=True, exist_ok=True)
         transaction_dir.mkdir(parents=True, exist_ok=True)
@@ -245,6 +279,12 @@ def install(zip_path, base_path, item, checkpoint=None):
             else:
                 remove_path(stage)
             raise
+        for root in directory_roots:
+            merge_preserved(preserved_dir / root, base / root)
+        try:
+            preserved_dir.rmdir()
+        except OSError:
+            pass
     return manifest
 
 
@@ -280,6 +320,16 @@ def uninstall(base_path, port_id):
                 path.rmdir()
             except OSError:
                 pass  # Conteúdo adicionado pelo usuário permanece no lugar.
+    preserved_dir = base / ".kmp" / "preserved" / port_id
+    for root in roots:
+        path = checked_path(base, root)
+        if path.is_dir():
+            preserved_target = preserved_dir / root
+            if preserved_target.exists() or preserved_target.is_symlink():
+                raise ValueError("já existem saves preservados para: " + root)
+            preserved_target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(path, preserved_target)
+            fsync_directory(base)
     manifest.unlink()
 
 

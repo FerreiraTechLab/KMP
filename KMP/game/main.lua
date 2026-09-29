@@ -549,14 +549,26 @@ local function startTorrentDownload(game)
                 if not handle then fail("não foi possível registrar o pacote"); return end
                 handle:write(Json.encode(game))
                 handle:close()
-                local command = quote(python) .. " " .. quote(installer) .. " install " ..
+                local installCommand = quote(python) .. " " .. quote(installer) .. " install " ..
                     quote(directory .. "/" .. game.packageFile) .. " " ..
-                    quote(basePorts) .. " " .. quote(itemFile) .. " 2>&1"
+                    quote(basePorts) .. " " .. quote(itemFile)
+                local command = installCommand ..
+                    "; code=$?; printf '\n__KMP_EXIT__=%s\n' \"$code\""
                 local process = io.popen(command)
                 if not process then fail("instalador indisponível"); return end
                 local output = process:read("*a")
-                local ok = process:close()
-                if not ok then fail((output or "falha na instalação"):sub(1, 160)); return end
+                process:close()
+                local exitCode = tonumber((output or ""):match("__KMP_EXIT__=(%d+)"))
+                output = (output or ""):gsub("%s*__KMP_EXIT__=%d+%s*$", "")
+                if exitCode ~= 0 then fail((output ~= "" and output or
+                    "falha na instalação"):sub(1, 160)); return end
+                local manifest = basePorts .. "/.kmp/manifests/" .. game.install.portId .. ".json"
+                local manifestHandle = io.open(manifest, "r")
+                if not manifestHandle then
+                    fail("instalador terminou sem registrar o port")
+                    return
+                end
+                manifestHandle:close()
                 channel:push({kind = "done"})
                 return
             else
@@ -721,16 +733,26 @@ local function executeUninstall()
             if not installer then
                 uninstallError = "Instalador indisponível."
             else
-                local command = shellQuote(PYTHON) .. " " .. shellQuote(installer) .. " uninstall " ..
-                    shellQuote(gameToUninstall.path) .. " " .. shellQuote(gameToUninstall.portId) .. " 2>&1"
+                local uninstallCommand = shellQuote(PYTHON) .. " " .. shellQuote(installer) ..
+                    " uninstall " .. shellQuote(gameToUninstall.path) .. " " ..
+                    shellQuote(gameToUninstall.portId)
+                local command = uninstallCommand ..
+                    "; code=$?; printf '\n__KMP_EXIT__=%s\n' \"$code\""
                 local process = io.popen(command)
                 local output = process and process:read("*a") or "Instalador indisponível"
-                local ok = process and process:close()
-                if ok then
+                if process then process:close() end
+                local exitCode = tonumber((output or ""):match("__KMP_EXIT__=(%d+)"))
+                output = (output or ""):gsub("%s*__KMP_EXIT__=%d+%s*$", "")
+                local manifest = gameToUninstall.path .. "/.kmp/manifests/" ..
+                    gameToUninstall.portId .. ".json"
+                local manifestHandle = io.open(manifest, "r")
+                if manifestHandle then manifestHandle:close() end
+                if exitCode == 0 and not manifestHandle then
                     scanInstalledPorts()
                     checkLocalFiles()
                 else
-                    uninstallError = (output or "Falha na remoção"):sub(1, 100)
+                    uninstallError = (output ~= "" and output or
+                        "Desinstalador terminou sem remover o manifesto"):sub(1, 100)
                 end
             end
         end
