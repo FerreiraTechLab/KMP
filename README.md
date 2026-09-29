@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.20
+# KDownloader PM v0.2.21
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -24,7 +24,7 @@ existing console seeder.
    default total upload limit is 100 KiB/s. No package manager is required.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.20.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.21.zip`; its contents match the layout in `KMP/port.json`.
 
 The portable dependency policy and reproducible download procedure are in
 `docs/PORTABLE-RUNTIME.md`.

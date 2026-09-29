@@ -37,6 +37,8 @@ local searchSelected = 1
 local searchChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 local showDetails = false
 local detailsSeed = {loading = false, found = false}
+local detailsSeedLastRefresh = 0
+local detailsSeedRefreshInterval = 2
 local catalogTrust = {
     configured = false, verified = false, active = false, sequence = 0,
     mirrors = 0, healthyMirrors = 0, fingerprint = "", expiresAt = "", error = ""
@@ -102,8 +104,10 @@ local function applySearch()
 end
 
 local function startSeedStatus(game)
-    detailsSeed = {loading = false, found = false}
-    if not game or not game.installed then return end
+    if not game or not game.installed then
+        detailsSeed = {loading = false, found = false}
+        return
+    end
     local endpoint = os.getenv("KMP_ARIA2_RPC")
     local secret = os.getenv("KMP_ARIA2_SECRET")
     if not endpoint or endpoint == "" or not secret or secret == "" then
@@ -387,7 +391,13 @@ function love.update(dt)
         if seedEvent then
             detailsSeed = seedEvent
             detailsSeed.loading = false
+            detailsSeedLastRefresh = love.timer.getTime()
         end
+    end
+    if showDetails and catalog[selectedIdx] and catalog[selectedIdx].installed and
+       not detailsSeed.loading and
+       love.timer.getTime() - detailsSeedLastRefresh >= detailsSeedRefreshInterval then
+        startSeedStatus(catalog[selectedIdx])
     end
     if appState == "splash" then
         splashTimer = splashTimer + dt
@@ -422,7 +432,16 @@ function love.update(dt)
 
     local torrentEvent = love.thread.getChannel("torrent_event"):pop()
     if torrentEvent and download.active then
-        if torrentEvent.kind == "progress" then
+        if torrentEvent.kind == "cached" then
+            download.phase = "cache"
+            download.progress = 100
+            download.statusText = "Arquivo já baixado; verificando para reinstalar..."
+            download.statusColor = {0.2, 0.75, 1.0}
+        elseif torrentEvent.kind == "started" then
+            download.phase = "conectando"
+            download.statusText = "Torrent iniciado; procurando fontes..."
+            download.statusColor = {0.0, 0.82, 1.0}
+        elseif torrentEvent.kind == "progress" then
             download.phase = "baixando"
             download.progress = torrentEvent.percent or 0
             download.speedBps = torrentEvent.speed or 0
@@ -510,8 +529,10 @@ local function startTorrentDownload(game)
         local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
         local function fail(message) channel:push({kind = "error", message = message}) end
         local backend = Torrent.new(Rpc.new(endpoint, secret), {peer = os.getenv("KMP_PEER")})
-        local gid, err = backend:start(game, directory)
+        local gid, err, reused = backend:start(game, directory)
         if not gid then fail(err or "aria2c não iniciou o torrent"); return end
+        channel:push({kind = reused and "cached" or "started"})
+        if reused then love.timer.sleep(0.7) end
         local lastProgress = 0
         local lastActivity = love.timer.getTime()
         local lastState = nil
@@ -692,6 +713,8 @@ local function handleActionConfirm()
     if download.active or syncing or #catalog == 0 then return end
     local game = catalog[selectedIdx]
     showDetails = true
+    detailsSeed = {loading = false, found = false}
+    detailsSeedLastRefresh = 0
     startSeedStatus(game)
 end
 
@@ -1367,6 +1390,10 @@ function love.draw()
             love.graphics.setFont(fontTitle)
             if download.phase == "baixando" then
                 love.graphics.printf("BAIXANDO PORT...", 120, 170, 400, "center")
+            elseif download.phase == "cache" then
+                love.graphics.printf("REUTILIZANDO DOWNLOAD...", 120, 170, 400, "center")
+            elseif download.phase == "conectando" then
+                love.graphics.printf("PROCURANDO FONTES...", 120, 170, 400, "center")
             elseif download.phase == "extraindo" then
                 love.graphics.printf("VALIDANDO E INSTALANDO...", 120, 170, 400, "center")
             end
@@ -1382,6 +1409,9 @@ function love.draw()
             if download.phase == "baixando" then
                 love.graphics.setColor(0.0, 0.82, 1.0)
                 love.graphics.rectangle("fill", 150, 245, 340 * (download.progress / 100), 16, 8, 8)
+            elseif download.phase == "cache" then
+                love.graphics.setColor(0.2, 0.75, 1.0)
+                love.graphics.rectangle("fill", 150, 245, 340, 16, 8, 8)
             elseif download.phase == "extraindo" then
                 love.graphics.setColor(0.7, 0.4, 1.0)
                 love.graphics.rectangle("fill", 150, 245, 340, 16, 8, 8)
@@ -1407,6 +1437,10 @@ function love.draw()
                 else
                     infoText = string.format("Progresso: %d%%   |   Velocidade: %s", math.floor(download.progress), speedStr)
                 end
+            elseif download.phase == "cache" then
+                infoText = "Usando o ZIP local e conferindo integridade."
+            elseif download.phase == "conectando" then
+                infoText = "Consultando web seeds, DHT, trackers e peers locais."
             else
                 infoText = "Download verificado; preparando instalação."
             end
@@ -1607,7 +1641,8 @@ function love.draw()
                 local oneAction = detailsSeed.paused and "A: retomar este" or "A: pausar este"
                 love.graphics.printf(oneAction .. "   X: pausar todos   Y: retomar todos",
                     75, 355, 490, "center")
-                love.graphics.printf("B: voltar", 90, 382, 460, "center")
+                love.graphics.printf("Atualização automática a cada 2s   |   B: voltar",
+                    90, 382, 460, "center")
             else
                 love.graphics.printf("A: instalar   B: voltar", 90, 380, 460, "center")
             end
