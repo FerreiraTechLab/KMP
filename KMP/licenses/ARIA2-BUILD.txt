@@ -1,0 +1,11 @@
+aria2c 1.37.0 static aarch64 build
+
+Project: https://github.com/aria2/aria2
+Binary build: https://github.com/abcfy2/aria2-static-build/releases/tag/1.37.0
+Asset: aria2-aarch64-linux-musl_static.zip
+Archive SHA-256: 0c681a89a40e0f82d1f5137608e86257eb0af201459c002941ea098f2b8c26b6
+Extracted aria2c SHA-256: 99a057bd383a28f1d5fab6e8cc5f6f3ed4172f5e65c59548242e965454d654c1
+Target: aarch64-unknown-linux-musl
+
+aria2 is distributed under GNU General Public License version 2 or later.
+The complete license text is stored in LICENSE.aria2.txt beside this file.

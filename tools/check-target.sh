@@ -19,6 +19,13 @@ for tool in aria2c curl unzip love; do
     fi
 done
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+bundled="$repo_dir/KMP/libs.$(uname -m)/aria2c"
+if [ -f "$bundled" ]; then
+    printf 'aria2c empacotado: %s\n' "$(file "$bundled")"
+fi
+
 if command -v aria2c >/dev/null 2>&1; then
     aria2c --version | sed -n '1,12p'
 fi

@@ -12,7 +12,7 @@
             "Kaiaum"
         ],
         "desc": "Catálogo assinado e instalador distribuído de homebrews por BitTorrent",
-        "inst": "Requer aria2 no DarkOS. Catálogos schema 2 usam mirrors HTTPS, assinatura Ed25519 e snapshots BitTorrent.",
+        "inst": "Inclui aria2c portátil para aarch64. Catálogos usam mirrors HTTPS, assinatura Ed25519 e snapshots BitTorrent.",
         "genres": [
             "other"
         ],

@@ -71,8 +71,14 @@ fi
 
 # Prefer a PortMaster-local BitTorrent client; fall back to the firmware package.
 # The application reports a missing backend when neither is available.
-if [ -x "$GAMEDIR/libs.${DEVICE_ARCH}/aria2c" ]; then
-  export KMP_ARIA2="$GAMEDIR/libs.${DEVICE_ARCH}/aria2c"
+runtime_arch=${DEVICE_ARCH:-$(uname -m)}
+[ "$runtime_arch" = "arm64" ] && runtime_arch=aarch64
+bundled_aria2="$GAMEDIR/libs.${runtime_arch}/aria2c"
+if [ -f "$bundled_aria2" ]; then
+  chmod +x "$bundled_aria2" 2>/dev/null || true
+fi
+if [ -x "$bundled_aria2" ]; then
+  export KMP_ARIA2="$bundled_aria2"
 elif command -v aria2c >/dev/null 2>&1; then
   export KMP_ARIA2="$(command -v aria2c)"
 else

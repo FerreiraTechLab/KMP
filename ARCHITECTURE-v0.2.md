@@ -100,6 +100,12 @@ offline. Uma falha nunca apaga o cache válido.
 
 ## Daemon BitTorrent
 
+O cliente distribui `aria2c` estático dentro de `libs.aarch64/`. Isso permite
+usar BitTorrent em firmwares imutáveis como Rocknix sem `apt` ou alterações na
+partição do sistema. O launcher prefere esse executável e mantém o aria2 do
+sistema apenas como fallback. Dependências centrais de vídeo, SDL e libc do
+firmware não são substituídas.
+
 O aria2 deixa de pertencer ao processo da interface:
 
 ```text

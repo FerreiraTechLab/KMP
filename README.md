@@ -1,7 +1,8 @@
-# KDownloader PM v0.2.15
+# KDownloader PM v0.2.16
 
 PortMaster app for discovering and installing redistributable homebrews through
-BitTorrent. The target is R36H with DarkOS based on Debian 13 (`aarch64`).
+BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
+including DarkOS, Rocknix, and immutable systems such as AurNix.
 
 The persistent seeding and signed distributed catalogue design for the next
 milestone is documented in [ARCHITECTURE-v0.2.md](ARCHITECTURE-v0.2.md).
@@ -15,16 +16,18 @@ available for seeding. The signed head embeds the torrent metadata and the
 torrent includes GitHub web seeds, so a first peer can bootstrap without an
 existing console seeder.
 
-## Setup on the R36H
+## Setup on a handheld
 
-1. Install the Debian torrent client: `sudo apt install aria2`.
-2. Put the PortMaster files in `/roms/ports/`: `KMP.sh` and the `KMP/` folder.
-3. Open KMP from the Ports menu. It connects to its persistent local `aria2c`
+1. Put the PortMaster files in the Ports directory: `KMP.sh` and `KMP/`.
+2. Open KMP from the Ports menu. It connects to its bundled `aria2c`
    daemon, which restores downloads and seeds from the previous session. The
-   default total upload limit is 100 KiB/s.
+   default total upload limit is 100 KiB/s. No package manager is required.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.15.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.16.zip`; its contents match the layout in `KMP/port.json`.
+
+The portable dependency policy and reproducible download procedure are in
+`docs/PORTABLE-RUNTIME.md`.
 
 Catalogue key rotation, offline backup, and recovery procedures are documented
 in `docs/CATALOG-KEYS.md`.
