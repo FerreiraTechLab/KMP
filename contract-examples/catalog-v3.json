@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 3,
+  "sequence": 6,
+  "generatedAt": "2026-10-10T23:30:00Z",
+  "items": [
+    {
+      "id": "example-port",
+      "name": "Example Port",
+      "description": "Port redistribuível usado para validar o contrato do KMP.",
+      "homepage": "https://example.org/example-port",
+      "source": "https://example.org/example-port/source",
+      "license": "MIT",
+      "porter": {
+        "name": "Example Porter",
+        "url": "https://example.org/porter"
+      },
+      "redistribution": {
+        "evidence": "https://example.org/example-port/license"
+      },
+      "release": {
+        "version": "1.0.0",
+        "revision": 1,
+        "channel": "stable",
+        "publishedAt": "2026-10-10T23:00:00Z",
+        "notes": "Primeira publicação.",
+        "review": {
+          "status": "approved",
+          "decisionId": "reviews/example-port/1",
+          "reviewedAt": "2026-10-10T23:20:00Z",
+          "reviewer": {
+            "name": "KMP Editorial",
+            "url": "https://github.com/FerreiraTechLab/KMP-catalog"
+          },
+          "checks": ["zip-layout", "hash", "launcher", "license", "malware-scan", "manual-run"]
+        },
+        "variants": [
+          {
+            "id": "aarch64-portmaster",
+            "priority": 100,
+            "requiredCapabilities": [],
+            "compatibility": {
+              "architectures": ["aarch64"],
+              "firmwares": {"include": ["darkos", "rocknix", "aurknix"]}
+            },
+            "requirements": {
+              "readyToRun": true,
+              "minimumRamMB": 512,
+              "analogSticks": 1,
+              "renderers": ["gles2"],
+              "runtimes": ["love_11_5"]
+            },
+            "download": {
+              "packageFile": "example-port-1.0.0.zip",
+              "sizeBytes": 12345,
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "infoHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "magnet": "magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&dn=example-port-1.0.0.zip",
+              "torrent": "ZA=="
+            },
+            "install": {
+              "portId": "example-port",
+              "paths": ["Example Port.sh", "example-port/"],
+              "userDataPaths": ["example-port/conf/"]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "revocations": []
+}

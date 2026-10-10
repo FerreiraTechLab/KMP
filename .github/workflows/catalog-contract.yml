@@ -2,9 +2,9 @@ name: Catalog contract
 
 on:
   push:
-    paths: ["catalog/**", "schemas/**", "tools/catalog-release.py"]
+    paths: ["catalog/**", "contract-examples/**", "schemas/**", "tools/catalog-release.py", "tools/validate-catalog.py", "tools/validate-contract.py"]
   pull_request:
-    paths: ["catalog/**", "schemas/**", "tools/catalog-release.py"]
+    paths: ["catalog/**", "contract-examples/**", "schemas/**", "tools/catalog-release.py", "tools/validate-catalog.py", "tools/validate-contract.py"]
 
 jobs:
   validate:
@@ -15,4 +15,9 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install check-jsonschema==0.33.3
-      - run: check-jsonschema --schemafile schemas/catalog-v2.schema.json catalog/catalog-*.json
+      - run: check-jsonschema --check-metaschema schemas/*.schema.json
+      - run: python3 tools/validate-catalog.py catalog/catalog-*.json contract-examples/catalog-v3.json
+      - run: check-jsonschema --schemafile schemas/publisher-submission-v1.schema.json contract-examples/submission-v1.json
+      - run: check-jsonschema --schemafile schemas/catalog-v3.schema.json contract-examples/catalog-v3.json
+      - run: python3 tools/validate-contract.py submission contract-examples/submission-v1.json
+      - run: python3 tools/validate-contract.py catalog contract-examples/catalog-v3.json

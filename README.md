@@ -9,6 +9,12 @@ milestone is documented in [ARCHITECTURE-v0.2.md](ARCHITECTURE-v0.2.md).
 Product priorities, open client gaps, and the deferred KMP Publisher plan are
 tracked in [ROADMAP.md](ROADMAP.md).
 
+The stable boundary between Publisher submissions, editorial review and the
+Client catalogue is specified in
+[docs/PUBLISHING-CONTRACT.md](docs/PUBLISHING-CONTRACT.md). Version 3 adds
+immutable revisions, package variants, provenance, review records and signed
+revocations while retaining catalogue v2 during migration.
+
 The package includes the official mirror list and Ed25519 public key. The app
 discovers the newest signed head, downloads its single-file catalogue through
 the persistent aria2 daemon, atomically activates it, and keeps the torrent

@@ -55,7 +55,9 @@ snapshot aceito quando for seguro.
 - [x] Publicar um JSON Schema para o catálogo e para o head.
 - [x] Executar a validação no CI do KMP Catalog.
 - [x] Adicionar `packageSha256` a cada pacote.
-- [ ] Preparar variantes por firmware, arquitetura e requisitos de hardware.
+- [x] Fechar o contrato Publisher → revisão → Client para catálogo v3.
+- [x] Especificar variantes por firmware, arquitetura e requisitos de hardware.
+- [ ] Implementar seleção das variantes v3 no Client.
 - [x] Manter compatibilidade explícita com o schema 2 durante a migração.
 
 Critério de conclusão: uma proposta inválida é rejeitada antes de chegar à

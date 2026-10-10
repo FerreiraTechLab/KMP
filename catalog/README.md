@@ -13,6 +13,13 @@ https://raw.githubusercontent.com/FerreiraTechLab/KMP-catalog/main/docs/snapshot
 Assim, o primeiro download pode vir do GitHub e o aria2 mantém o torrent ativo
 para servir o mesmo snapshot a outros consoles.
 
-O contrato formal está em `schemas/catalog-v2.schema.json`. As sequências 1 e 2
-continuam válidas durante a migração. Desde a sequência 3, cada item precisa
-declarar `packageSha256`; o cliente compara esse hash antes da extração.
+O contrato atualmente consumido pelo cliente está em
+`schemas/catalog-v2.schema.json`. As sequências 1 e 2 continuam válidas durante
+a migração. Desde a sequência 3, cada item precisa declarar `packageSha256`; o
+cliente compara esse hash antes da extração.
+
+O próximo contrato está em `schemas/catalog-v3.schema.json`. Ele separa versão
+visível de revisão ordenável, registra procedência e revisão, permite variantes
+por dispositivo e distribui revogações assinadas. A fronteira completa com o
+Publisher está documentada em `docs/PUBLISHING-CONTRACT.md`. Snapshots v3 só
+serão publicados depois que o Client implementar esse contrato.

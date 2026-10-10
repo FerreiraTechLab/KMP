@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "example-port",
+    "name": "Example Port",
+    "description": "Port redistribuível usado para validar o contrato do KMP.",
+    "homepage": "https://example.org/example-port",
+    "source": "https://example.org/example-port/source",
+    "license": "MIT",
+    "porter": {
+      "name": "Example Porter",
+      "url": "https://example.org/porter"
+    },
+    "redistribution": {
+      "allowed": true,
+      "evidence": "https://example.org/example-port/license"
+    }
+  },
+  "submitter": {
+    "name": "Example Porter",
+    "url": "https://example.org/porter"
+  },
+  "release": {
+    "version": "1.0.0",
+    "revision": 1,
+    "channel": "stable",
+    "publishedAt": "2026-10-10T23:00:00Z",
+    "notes": "Primeira publicação.",
+    "variants": [
+      {
+        "id": "aarch64-portmaster",
+        "priority": 100,
+        "requiredCapabilities": [],
+        "compatibility": {
+          "architectures": ["aarch64"],
+          "firmwares": {"include": ["darkos", "rocknix", "aurknix"]}
+        },
+        "requirements": {
+          "readyToRun": true,
+          "minimumRamMB": 512,
+          "analogSticks": 1,
+          "renderers": ["gles2"],
+          "runtimes": ["love_11_5"]
+        },
+        "package": {
+          "path": "packages/example-port-1.0.0.zip",
+          "sizeBytes": 12345,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "install": {
+          "portId": "example-port",
+          "paths": ["Example Port.sh", "example-port/"],
+          "userDataPaths": ["example-port/conf/"]
+        },
+        "checks": ["zip-layout", "hash", "launcher", "license", "local-run"]
+      }
+    ]
+  }
+}
