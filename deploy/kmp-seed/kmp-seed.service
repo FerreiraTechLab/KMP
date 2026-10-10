@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/aria2c --dir=%h/.local/share/kmp-seed/data --check-integrity=true --continue=true --file-allocation=none --enable-dht=true --enable-peer-exchange=true --bt-enable-lpd=true --listen-port=6881 --dht-listen-port=6881 --seed-ratio=0.0 --max-overall-upload-limit=0 --dht-file-path=%h/.local/share/kmp-seed/dht.dat --save-session=%h/.local/share/kmp-seed/session.txt --save-session-interval=30 --log=%h/.local/share/kmp-seed/aria2.log --log-level=notice %h/.local/share/kmp-seed/torrents/catalog-00000003.torrent %h/.local/share/kmp-seed/torrents/celeste64-1.1.1.torrent
+ExecStart=/usr/bin/aria2c --dir=%h/.local/share/kmp-seed/data --check-integrity=true --continue=true --file-allocation=none --enable-dht=true --enable-peer-exchange=true --bt-enable-lpd=true --listen-port=6881 --dht-listen-port=6881 --seed-ratio=0.0 --max-overall-upload-limit=0 --dht-file-path=%h/.local/share/kmp-seed/dht.dat --save-session=%h/.local/share/kmp-seed/session.txt --save-session-interval=30 --log=%h/.local/share/kmp-seed/aria2.log --log-level=notice %h/.local/share/kmp-seed/torrents/catalog-00000004.torrent %h/.local/share/kmp-seed/torrents/celeste64-1.1.1.torrent %h/.local/share/kmp-seed/torrents/kmp-update-test-1.0.torrent
 Restart=on-failure
 RestartSec=10
 
