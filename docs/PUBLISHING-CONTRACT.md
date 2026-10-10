@@ -49,6 +49,8 @@ o pacote ser aceito.
 Cada variante é analisada por `tools/audit-package.py`. Seu relatório segue
 `schemas/audit-report-v1.schema.json` e faz parte dos registros da revisão. A
 política de reprovações e alertas está em `docs/PORT-SECURITY.md`.
+Alertas exigem uma decisão editorial registrada, mas não impedem por si mesmos
+a publicação ou a instalação.
 
 ## Catálogo entregue ao Client
 

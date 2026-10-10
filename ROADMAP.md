@@ -80,7 +80,8 @@ ajuda, quanto custa ao dispositivo e como o cliente degrada para HTTP.
       programa seja benigno.
 - [x] Criar verificações automáticas para launchers e arquivos executáveis.
 - [x] Registrar procedência, licença e revisão editorial de cada pacote.
-- [ ] Avaliar isolamento possível para ports no DarkOS.
+- [x] Definir isolamento como capacidade opcional por variante, sem bloquear
+      instalação quando estiver ausente.
 
 Critério de conclusão: cada pacote publicado possui origem, licença, resultado
 das verificações e decisão de revisão rastreáveis.

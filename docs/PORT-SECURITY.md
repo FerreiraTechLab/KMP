@@ -44,6 +44,28 @@ Um alerta pode ser legítimo em um port específico. A decisão e sua justificat
 devem ser registradas no processo editorial. O relatório nunca marca esses
 casos silenciosamente como seguros.
 
+## Efeito no Client
+
+O Client não bloqueia uma instalação por alerta do auditor nem pela ausência de
+isolamento. Ele mostra o estado da revisão e permite que o usuário prossiga. Um
+desenvolvedor pode, por exemplo, ter esquecido de incluir o arquivo de licença
+no ZIP mesmo quando a licença e sua evidência estão declaradas na proposta.
+
+Somente uma reprovação editorial, uma revogação assinada ou uma falha objetiva
+verificada pelo próprio Client, como hash incorreto, pacote incompatível ou
+estrutura insegura, impede a instalação.
+
+## Isolamento de execução
+
+DarkOS e Aurknix precisam expor ao port recursos como GPU, áudio, controles e
+diretórios de saves. Um isolamento obrigatório pode impedir ports legítimos de
+funcionar e não será requisito de instalação.
+
+Caso um mecanismo compatível seja desenvolvido, ele deve ser opcional e
+ativado por variante após teste no hardware. Executar sem isolamento pode ser
+informado ao usuário, mas não altera a decisão editorial nem impede a
+instalação.
+
 ## Etapas editoriais posteriores
 
 1. Repetir o auditor em ambiente limpo.
