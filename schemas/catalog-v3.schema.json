@@ -39,7 +39,7 @@
         "description": {"type": "string", "minLength": 1, "maxLength": 2000},
         "homepage": {"$ref": "#/$defs/httpsUrl"},
         "source": {"$ref": "#/$defs/httpsUrl"},
-        "license": {"type": "string", "pattern": "^[A-Za-z0-9.+-]+$"},
+        "license": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "^[A-Za-z0-9.+() -]+$"},
         "porter": {"$ref": "#/$defs/person"},
         "redistribution": {
           "type": "object", "additionalProperties": false,

@@ -32,7 +32,8 @@ comparar atualizações sem interpretar versões como `1.0`, `v2-beta` ou datas.
 
 O arquivo segue `schemas/publisher-submission-v1.schema.json` e contém:
 
-- identidade do projeto, upstream, código fonte e licença;
+- identidade do projeto, upstream, código fonte e licença ou expressão de
+  licenças;
 - identidade e contato público do responsável pelo envio;
 - declaração explícita de permissão para redistribuir o pacote;
 - versão, revisão, changelog e canal;
@@ -88,7 +89,8 @@ Uma assinatura do catálogo autentica a decisão editorial; ela não prova que o
 programa seja benigno. Todo item publicado registra:
 
 - upstream e repositório de código fonte;
-- licença SPDX e evidência de redistribuição;
+- licença SPDX, expressão SPDX ou `LicenseRef-*` para pacotes mistos, sempre
+  acompanhada de evidência e notas de redistribuição;
 - responsável pelo port;
 - identificador público da revisão;
 - revisor, data e verificações realizadas.
