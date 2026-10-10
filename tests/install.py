@@ -123,13 +123,77 @@ class InstallTests(unittest.TestCase):
         p2p = self.base / ".kmp/p2p-tests/example-123/example.zip"
         p2p.parent.mkdir(parents=True)
         p2p.write_text("package")
+        update_cache = self.base / (".kmp/updates/example-" + "b" * 40) / "example.zip"
+        update_cache.parent.mkdir(parents=True)
+        update_cache.write_text("package")
 
         module.uninstall(self.base, "example")
         self.assertFalse((self.base / "example").exists())
         self.assertFalse((self.base / ".kmp/preserved/example").exists())
         self.assertFalse((self.base / ".kmp/torrents/example").exists())
         self.assertFalse((self.base / ".kmp/p2p-tests/example-123").exists())
+        self.assertFalse(update_cache.parent.exists())
         self.assertFalse((self.base / ".kmp/manifests/example.json").exists())
+
+    def test_update_replaces_package_and_preserves_user_files(self):
+        self.make_zip({"example.sh": "#!/bin/sh\necho old\n", "example/data.txt": "old"})
+        module.install(self.package, self.base, self.item)
+        save = self.base / "example/conf/save.json"
+        save.parent.mkdir()
+        save.write_text("progress")
+        self.item["version"] = "2"
+        self.item["infoHash"] = "b" * 40
+        self.make_zip({"example.sh": "#!/bin/sh\necho new\n", "example/data.txt": "new",
+                       "example/new.txt": "added"})
+
+        manifest = module.update(self.package, self.base, self.item)
+
+        self.assertIn("echo new", (self.base / "example.sh").read_text())
+        self.assertEqual((self.base / "example/data.txt").read_text(), "new")
+        self.assertEqual((self.base / "example/new.txt").read_text(), "added")
+        self.assertEqual(save.read_text(), "progress")
+        self.assertEqual(json.loads(manifest.read_text())["version"], "2")
+        self.assertFalse(any(self.base.glob(".kmp-backup-*")))
+
+    def test_update_recovers_old_or_committed_version_after_power_loss(self):
+        class PowerLoss(BaseException):
+            pass
+
+        points = ("journaled", "prepared", "backed_up:example",
+                  "replaced:example", "merged", "manifest")
+        for point in points:
+            with self.subTest(point=point), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory)
+                package = base / "example.zip"
+                with zipfile.ZipFile(package, "w") as archive:
+                    archive.writestr("example.sh", "#!/bin/sh\necho old\n")
+                    archive.writestr("example/data.txt", "old")
+                old_item = dict(self.item)
+                old_item["install"] = dict(self.item["install"])
+                module.install(package, base, old_item)
+                save = base / "example/conf/save.json"
+                save.parent.mkdir()
+                save.write_text("progress")
+                new_item = dict(old_item)
+                new_item["version"] = "2"
+                new_item["infoHash"] = "b" * 40
+                with zipfile.ZipFile(package, "w") as archive:
+                    archive.writestr("example.sh", "#!/bin/sh\necho new\n")
+                    archive.writestr("example/data.txt", "new")
+
+                def checkpoint(current):
+                    if current == point:
+                        raise PowerLoss()
+
+                with self.assertRaises(PowerLoss):
+                    module.update(package, base, new_item, checkpoint=checkpoint)
+                expected = "committed" if point == "manifest" else "rolled_back"
+                self.assertEqual(module.recover(base), [("example", expected)])
+                record = json.loads((base / ".kmp/manifests/example.json").read_text())
+                self.assertEqual(record["version"], "2" if expected == "committed" else "1")
+                self.assertIn("echo " + ("new" if expected == "committed" else "old"),
+                              (base / "example.sh").read_text())
+                self.assertEqual(save.read_text(), "progress")
 
     def test_reinstall_adopts_save_directory_left_by_older_client(self):
         self.make_zip({"example.sh": "#!/bin/sh\n", "example/data.txt": "data"})

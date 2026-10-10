@@ -81,19 +81,28 @@ local download = {
 
 local function isWindows() return love.system.getOS() == "Windows" end
 
-local function isInstalled(game)
+local function installedRecord(game)
     local basePorts = sdPaths[currentSd]
     if isWindows() then basePorts = "." end
 
     local manifest = basePorts .. "/.kmp/manifests/" .. game.install.portId .. ".json"
     local handle = io.open(manifest, "r")
-    if handle then handle:close(); return true end
-    return false
+    if not handle then return nil end
+    local content = handle:read("*a")
+    handle:close()
+    local record = Json.decode(content)
+    if type(record) == "table" and record.portId == game.install.portId then return record end
+    return nil
 end
 
 local function checkLocalFiles()
     for _, game in ipairs(catalogAll) do
-        game.installed = isInstalled(game)
+        local record = installedRecord(game)
+        game.installed = record ~= nil
+        game.installedVersion = record and record.version or nil
+        game.installedInfoHash = record and record.infoHash or nil
+        game.installedPackageFile = record and record.packageFile or nil
+        game.updateAvailable = record ~= nil and Catalog.isUpdate(record.version, game.version)
     end
 end
 
@@ -125,7 +134,7 @@ local function startSeedStatus(game)
         love.thread.getChannel("seed_status_done"):push(
             result or {error = err or "status indisponivel"})
     ]])
-    worker:start(endpoint, secret, game.infoHash)
+    worker:start(endpoint, secret, game.installedInfoHash or game.infoHash)
 end
 
 local function startSeedAction(action, game)
@@ -287,9 +296,10 @@ local function decodeCatalog(content)
     local parsed, errorMessage = Json.decode(content)
     if type(parsed) ~= "table" then return nil, errorMessage or "JSON inválido" end
     if parsed.error then return nil, "script: " .. tostring(parsed.error):sub(1, 60) end
-    local items, validationError = Catalog.validate(parsed)
+    local items, validationError, metadata = Catalog.validate(parsed)
     if not items then return nil, validationError end
     for _, item in ipairs(items) do
+        item.catalogSequence = metadata and metadata.sequence or 0
         item.filename = item.packageFile
         item.size = item.sizeBytes < 1048576 and
             string.format("%.1f KB", item.sizeBytes / 1024) or
@@ -442,7 +452,9 @@ function love.update(dt)
         elseif torrentEvent.kind == "cached" then
             download.phase = "cache"
             download.progress = 100
-            download.statusText = "Arquivo já baixado; verificando para reinstalar..."
+            download.statusText = download.updateMode and
+                "Atualização já baixada; verificando pacote..." or
+                "Arquivo já baixado; verificando para reinstalar..."
             download.statusColor = {0.2, 0.75, 1.0}
         elseif torrentEvent.kind == "started" then
             download.phase = "conectando"
@@ -467,14 +479,17 @@ function love.update(dt)
         elseif torrentEvent.kind == "installing" then
             download.phase = "extraindo"
             download.progress = 100
-            download.statusText = "Verificado. Instalando pacote..."
+            download.statusText = download.updateMode and
+                "Verificado. Atualizando port com rollback protegido..." or
+                "Verificado. Instalando pacote..."
             download.statusColor = {0.7, 0.4, 1.0}
         elseif torrentEvent.kind == "done" then
             download.active = false
             download.phase = "none"
             download.progress = 100
             download.ext_progress = 100
-            download.statusText = "Concluído! " .. download.game.name .. " instalado."
+            download.statusText = "Concluído! " .. download.game.name ..
+                (torrentEvent.updated and " atualizado." or " instalado.")
             download.statusColor = {0.2, 0.85, 0.45}
             checkLocalFiles()
             showRestartPopup = true
@@ -493,7 +508,7 @@ local function shellQuote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
-local function startTorrentDownload(game, peerOnly)
+local function startTorrentDownload(game, peerOnly, updateMode)
     local endpoint = os.getenv("KMP_ARIA2_RPC")
     local secret = os.getenv("KMP_ARIA2_SECRET")
     local installer = os.getenv("KMP_INSTALLER")
@@ -504,7 +519,9 @@ local function startTorrentDownload(game, peerOnly)
     end
     local basePorts = sdPaths[currentSd]
     local directory = basePorts .. "/.kmp/torrents/" .. game.id
-    if peerOnly then
+    if updateMode then
+        directory = basePorts .. "/.kmp/updates/" .. game.id .. "-" .. game.infoHash:lower()
+    elseif peerOnly then
         directory = basePorts .. "/.kmp/p2p-tests/" .. game.id .. "-" ..
             tostring(os.time()) .. "-" .. tostring(math.floor(love.timer.getTime() * 1000))
     end
@@ -528,12 +545,13 @@ local function startTorrentDownload(game, peerOnly)
     download.speedBps = 0
     download.game = game
     download.peerOnly = peerOnly == true
+    download.updateMode = updateMode == true
     download.statusText = "Procurando peers..."
     download.statusColor = {0.0, 0.82, 1.0}
     while love.thread.getChannel("torrent_cancel"):pop() do end
 
     local worker = love.thread.newThread([[
-        local python, game, basePorts, directory, endpoint, secret, installer, peerOnly = ...
+        local python, game, basePorts, directory, endpoint, secret, installer, peerOnly, updateMode = ...
         require("love.timer")
         local Json = require("json")
         local Rpc = require("aria2_rpc")
@@ -594,7 +612,8 @@ local function startTorrentDownload(game, peerOnly)
                 if not handle then fail("não foi possível registrar o pacote"); return end
                 handle:write(Json.encode(game))
                 handle:close()
-                local installCommand = quote(python) .. " " .. quote(installer) .. " install " ..
+                local operation = updateMode and "update" or "install"
+                local installCommand = quote(python) .. " " .. quote(installer) .. " " .. operation .. " " ..
                     quote(directory .. "/" .. game.packageFile) .. " " ..
                     quote(basePorts) .. " " .. quote(itemFile)
                 local command = installCommand ..
@@ -614,7 +633,16 @@ local function startTorrentDownload(game, peerOnly)
                     return
                 end
                 manifestHandle:close()
-                channel:push({kind = "done"})
+                if updateMode and game.installedInfoHash and
+                   game.installedInfoHash:lower() ~= game.infoHash:lower() then
+                    local forgotten = backend:forget(game.installedInfoHash)
+                    if forgotten then
+                        os.execute("rm -rf -- " .. quote(basePorts .. "/.kmp/torrents/" .. game.id))
+                        os.execute("rm -rf -- " .. quote(basePorts .. "/.kmp/updates/" ..
+                            game.id .. "-" .. game.installedInfoHash:lower()))
+                    end
+                end
+                channel:push({kind = "done", updated = updateMode})
                 return
             else
                 if state.downloadedBytes > lastProgress or state.connections > 0 then
@@ -640,7 +668,8 @@ local function startTorrentDownload(game, peerOnly)
             love.timer.sleep(1)
         end
     ]])
-    worker:start(PYTHON, game, basePorts, directory, endpoint, secret, installer, peerOnly == true)
+    worker:start(PYTHON, game, basePorts, directory, endpoint, secret, installer,
+        peerOnly == true, updateMode == true)
 end
 
 function love.threaderror(thread, errorMessage)
@@ -651,9 +680,9 @@ function love.threaderror(thread, errorMessage)
     download.statusColor = {1.0, 0.3, 0.3}
 end
 
-function startDownload(game, peerOnly)
-    if not game or download.active or game.installed then return end
-    return startTorrentDownload(game, peerOnly == true)
+function startDownload(game, peerOnly, updateMode)
+    if not game or download.active or (game.installed and not updateMode) then return end
+    return startTorrentDownload(game, peerOnly == true, updateMode == true)
 end
 
 local function handleToggleSD()
@@ -869,7 +898,10 @@ function love.keypressed(key)
 
     if showDetails then
         local game = catalog[selectedIdx]
-        if key == "return" and game.installed then
+        if key == "return" and game.installed and game.updateAvailable then
+            showDetails = false
+            startDownload(game, false, true)
+        elseif key == "return" and game.installed then
             startSeedAction(detailsSeed.paused and "resume_one" or "pause_one", game)
         elseif key == "return" then
             showDetails = false
@@ -1028,7 +1060,10 @@ function love.gamepadpressed(joystick, button)
 
     if showDetails then
         local game = catalog[selectedIdx]
-        if button == "a" and game.installed then
+        if button == "a" and game.installed and game.updateAvailable then
+            showDetails = false
+            startDownload(game, false, true)
+        elseif button == "a" and game.installed then
             startSeedAction(detailsSeed.paused and "resume_one" or "pause_one", game)
         elseif button == "a" then
             showDetails = false
@@ -1411,11 +1446,15 @@ function love.draw()
                     love.graphics.printf(game.size or "Port", 430, y + 12, 170, "right")
 
                     if game.installed then
-                        love.graphics.setColor(0.2, 0.85, 0.45, 0.15)
+                        local hasUpdate = game.updateAvailable
+                        love.graphics.setColor(hasUpdate and 0.95 or 0.2,
+                            hasUpdate and 0.65 or 0.85, hasUpdate and 0.2 or 0.45, 0.15)
                         love.graphics.rectangle("fill", 520, y + 25, 80, 18, 4, 4)
-                        love.graphics.setColor(0.2, 0.85, 0.45)
+                        love.graphics.setColor(hasUpdate and 0.95 or 0.2,
+                            hasUpdate and 0.65 or 0.85, hasUpdate and 0.2 or 0.45)
                         love.graphics.setFont(fontSub)
-                        love.graphics.printf("INSTALADO", 520, y + 28, 80, "center")
+                        love.graphics.printf(hasUpdate and "ATUALIZAR" or "INSTALADO",
+                            520, y + 28, 80, "center")
                     else
                         love.graphics.setColor(1, 1, 1, 0.05)
                         love.graphics.rectangle("fill", 540, y + 25, 60, 18, 4, 4)
@@ -1443,7 +1482,8 @@ function love.draw()
             love.graphics.setColor(0.96, 0.97, 1.0)
             love.graphics.setFont(fontTitle)
             if download.phase == "baixando" then
-                love.graphics.printf("BAIXANDO PORT...", 120, 170, 400, "center")
+                love.graphics.printf(download.updateMode and "BAIXANDO ATUALIZAÇÃO..." or
+                    "BAIXANDO PORT...", 120, 170, 400, "center")
             elseif download.phase == "p2p" then
                 love.graphics.printf("PREPARANDO TESTE P2P...", 120, 170, 400, "center")
             elseif download.phase == "cache" then
@@ -1451,7 +1491,8 @@ function love.draw()
             elseif download.phase == "conectando" then
                 love.graphics.printf("PROCURANDO FONTES...", 120, 170, 400, "center")
             elseif download.phase == "extraindo" then
-                love.graphics.printf("VALIDANDO E INSTALANDO...", 120, 170, 400, "center")
+                love.graphics.printf(download.updateMode and "APLICANDO ATUALIZAÇÃO..." or
+                    "VALIDANDO E INSTALANDO...", 120, 170, 400, "center")
             end
 
             love.graphics.setColor(0.75, 0.82, 0.92)
@@ -1673,7 +1714,11 @@ function love.draw()
             love.graphics.printf(game.name, 90, 85, 460, "center")
             love.graphics.setColor(0.85, 0.9, 0.95)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("Versão: " .. (game.version or "-") .. "   |   Licença: " .. (game.license or "-") ..
+            local versionText = game.installed and
+                ("Instalada: " .. tostring(game.installedVersion or "-") ..
+                 "   |   Disponível: " .. tostring(game.version or "-")) or
+                ("Versão: " .. tostring(game.version or "-"))
+            love.graphics.printf(versionText .. "   |   Licença: " .. (game.license or "-") ..
                 "   |   Tamanho: " .. (game.size or "-"), 90, 125, 460, "center")
             love.graphics.setFont(fontItem)
             love.graphics.printf(game.description or "Sem descrição", 95, 160, 450, "center")
@@ -1681,8 +1726,11 @@ function love.draw()
             love.graphics.setColor(0.5, 0.6, 0.7)
             love.graphics.printf("Destino: " .. sdLabels[currentSd], 90, 245, 460, "center")
             if game.installed then
-                love.graphics.setColor(0.2, 0.85, 0.45)
-                love.graphics.printf("INSTALADO", 90, 270, 460, "center")
+                love.graphics.setColor(game.updateAvailable and 0.95 or 0.2,
+                    game.updateAvailable and 0.65 or 0.85,
+                    game.updateAvailable and 0.2 or 0.45)
+                love.graphics.printf(game.updateAvailable and "ATUALIZAÇÃO DISPONÍVEL" or "INSTALADO",
+                    90, 270, 460, "center")
                 love.graphics.setColor(0.68, 0.76, 0.86)
                 local seedText = "Semeacao: consultando..."
                 if not detailsSeed.loading then
@@ -1701,7 +1749,8 @@ function love.draw()
                         85, 324, 470, "center")
                 end
                 love.graphics.setColor(0.5, 0.6, 0.7)
-                local oneAction = detailsSeed.paused and "A: retomar este" or "A: pausar este"
+                local oneAction = game.updateAvailable and "A: atualizar" or
+                    (detailsSeed.paused and "A: retomar este" or "A: pausar este")
                 love.graphics.printf(oneAction .. "   X: pausar todos   Y: retomar todos",
                     75, 355, 490, "center")
                 love.graphics.printf("Atualização automática a cada 2s   |   B: voltar",

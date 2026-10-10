@@ -108,4 +108,26 @@ function Catalog.search(items, query)
     return result
 end
 
+function Catalog.isUpdate(installed, available)
+    installed, available = tostring(installed or ""), tostring(available or "")
+    if installed == "" or available == "" or installed == available then return false end
+    local function numericParts(value)
+        value = value:gsub("^v", "")
+        if not value:match("^%d[%d%.]*%d$") and not value:match("^%d$") then return nil end
+        local parts = {}
+        for part in value:gmatch("%d+") do parts[#parts + 1] = tonumber(part) end
+        return parts
+    end
+    local old, new = numericParts(installed), numericParts(available)
+    if old and new then
+        for index = 1, math.max(#old, #new) do
+            local left, right = old[index] or 0, new[index] or 0
+            if right > left then return true end
+            if right < left then return false end
+        end
+        return false
+    end
+    return true
+end
+
 return Catalog

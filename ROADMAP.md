@@ -85,8 +85,8 @@ das verificações e decisão de revisão rastreáveis.
 
 ### P2 — manutenção do cliente
 
-- [ ] Implementar atualização de ports já instalados.
-- [ ] Mostrar versão instalada e versão disponível separadamente.
+- [x] Implementar atualização de ports já instalados.
+- [x] Mostrar versão instalada e versão disponível separadamente.
 - [ ] Melhorar logs exportáveis para suporte.
 - [ ] Testar restauração da sessão aria2 e política de bateria no hardware.
 - [ ] Criar testes de interface para todos os fluxos do controle.

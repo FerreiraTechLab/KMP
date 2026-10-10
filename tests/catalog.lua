@@ -17,6 +17,10 @@ local valid, err = Catalog.validate(document)
 assert(valid and not err)
 assert(#Catalog.search(valid, "HOME") == 1)
 assert(#Catalog.search(valid, "missing") == 0)
+assert(Catalog.isUpdate("1.1.1", "1.2.0"))
+assert(not Catalog.isUpdate("1.2.0", "1.1.1"))
+assert(not Catalog.isUpdate("1.1", "1.1.0"))
+assert(Catalog.isUpdate("custom-a", "custom-b"))
 
 document.items[1].install.paths = {"../escape"}
 assert(Catalog.validate(document) == nil)

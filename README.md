@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.24
+# KDownloader PM v0.2.25
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -32,7 +32,7 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.24.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.25.zip`; its contents match the layout in `KMP/port.json`.
 
 The portable dependency policy and reproducible download procedure are in
 `docs/PORTABLE-RUNTIME.md`.
@@ -60,9 +60,16 @@ placeholder hash and cannot be downloaded.
 The old static Google Drive/Pixeldrain catalogue is not read by this version.
 The last valid version 1 catalogue is cached for temporary network outages.
 Downloaded packages remain under `/roms/ports/.kmp/torrents/` (or SD2) so that
-aria2 can resume and seed them during the session. Installed files are tracked
-in `.kmp/manifests/`; the uninstaller only removes managed files. Existing
-ports without a manifest must be removed manually.
+aria2 can resume and seed them during the session. Installed ports are tracked
+in `.kmp/manifests/`. Ports without a manifest must be removed manually.
+Removing a managed port is
+deliberately complete: installed files, saves, settings, cached packages and
+its BitTorrent session are deleted.
+
+When the signed catalogue publishes a version different from the installed
+manifest, the client shows both versions and offers an update. Updates replace
+package-owned files, preserve user-created saves and settings, and use a
+persistent journal to restore the previous version after an interruption.
 
 ## Development
 
