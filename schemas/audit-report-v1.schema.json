@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ferreiratechlab.github.io/KMP-catalog/schemas/audit-report-v1.schema.json",
+  "title": "KMP Package Audit Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policyVersion", "auditedAt", "projectId", "releaseRevision", "variantId", "package", "verdict", "summary", "findings", "executables"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "policyVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "auditedAt": {"type": "string", "format": "date-time"},
+    "projectId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "releaseRevision": {"type": "integer", "minimum": 1},
+    "variantId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "package": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256", "entries", "unpackedBytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sizeBytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "entries": {"type": "integer", "minimum": 0},
+        "unpackedBytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "verdict": {"enum": ["pass", "review", "reject"]},
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": {"type": "integer", "minimum": 0},
+        "warnings": {"type": "integer", "minimum": 0}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+          "severity": {"enum": ["error", "warning", "info"]},
+          "message": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "line": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "executables": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "type", "architecture", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "type": {"enum": ["elf", "shell", "file"]},
+          "architecture": {"type": ["string", "null"]},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

@@ -46,6 +46,10 @@ Hashes e verificações declarados pelo Publisher são repetidos pela automaçã
 editorial. Magnet, torrent, web seeds e decisão de revisão são produzidos após
 o pacote ser aceito.
 
+Cada variante é analisada por `tools/audit-package.py`. Seu relatório segue
+`schemas/audit-report-v1.schema.json` e faz parte dos registros da revisão. A
+política de reprovações e alertas está em `docs/PORT-SECURITY.md`.
+
 ## Catálogo entregue ao Client
 
 O arquivo segue `schemas/catalog-v3.schema.json`. Cada item contém somente uma

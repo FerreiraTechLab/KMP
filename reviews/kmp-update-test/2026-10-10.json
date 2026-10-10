@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": "1.0",
+  "auditedAt": "2026-10-10T23:44:42Z",
+  "projectId": "kmp-update-test",
+  "releaseRevision": 2,
+  "variantId": "aarch64-portmaster-love",
+  "package": {
+    "path": "kmp-update-test-2.0.zip",
+    "sizeBytes": 2603,
+    "sha256": "5bdcf0dd9b340ff19c5ab9b6d1e14cef5052a17a8925098430e99f9b53b22b01",
+    "entries": 5,
+    "unpackedBytes": 2390
+  },
+  "verdict": "pass",
+  "summary": {
+    "errors": 0,
+    "warnings": 0
+  },
+  "findings": [],
+  "executables": [
+    {
+      "path": "kmp-update-test.sh",
+      "type": "shell",
+      "architecture": null,
+      "sha256": "feea2bdd0674cbb2abbbcb4f4b22494993353d1145c92f84b49ce97657866765"
+    }
+  ]
+}

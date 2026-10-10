@@ -76,10 +76,10 @@ ajuda, quanto custa ao dispositivo e como o cliente degrada para HTTP.
 
 ### P1 — execução e revisão de ports
 
-- [ ] Documentar que a assinatura autentica o publicador, sem garantir que o
+- [x] Documentar que a assinatura autentica o publicador, sem garantir que o
       programa seja benigno.
-- [ ] Criar verificações automáticas para launchers e arquivos executáveis.
-- [ ] Registrar procedência, licença e revisão editorial de cada pacote.
+- [x] Criar verificações automáticas para launchers e arquivos executáveis.
+- [x] Registrar procedência, licença e revisão editorial de cada pacote.
 - [ ] Avaliar isolamento possível para ports no DarkOS.
 
 Critério de conclusão: cada pacote publicado possui origem, licença, resultado

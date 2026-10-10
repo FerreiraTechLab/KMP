@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "policyVersion": "1.0",
+  "auditedAt": "2026-10-10T23:44:42Z",
+  "projectId": "celeste64",
+  "releaseRevision": 1,
+  "variantId": "aarch64-portmaster",
+  "package": {
+    "path": "celeste64.zip",
+    "sizeBytes": 32650808,
+    "sha256": "6187af641d2aa29f25c229b19b05a58a827200f88eab274deaf60474041d2faf",
+    "entries": 279,
+    "unpackedBytes": 87999573
+  },
+  "verdict": "review",
+  "summary": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "findings": [
+    {
+      "code": "LICENSE_NOT_PACKAGED",
+      "severity": "warning",
+      "message": "o ZIP não contém LICENSE ou COPYING; conferir a evidência externa"
+    }
+  ],
+  "executables": [
+    {
+      "path": "Celeste64.sh",
+      "type": "shell",
+      "architecture": null,
+      "sha256": "045fa0bdb4ca2f537ade0ce5ad69d86fc409727f3e92d4b6eedb8c956e2ffab2"
+    },
+    {
+      "path": "celeste64/Celeste64",
+      "type": "elf",
+      "architecture": "aarch64",
+      "sha256": "179966eb218fd70ea0a1cf9091b752920b6d8103c3c138516fb8466525982da9"
+    },
+    {
+      "path": "celeste64/libFosterPlatform.so",
+      "type": "elf",
+      "architecture": "aarch64",
+      "sha256": "18faaf3ef15c5cc4e1ce669d8f28d2067ccdac91737a9c02eb8f7f0c1f7937cc"
+    },
+    {
+      "path": "celeste64/libfmod.so",
+      "type": "elf",
+      "architecture": "aarch64",
+      "sha256": "440556e5948d78dc60d08267afd8031065fe435a572bdb85954dafec2bd05ba3"
+    },
+    {
+      "path": "celeste64/libfmodstudio.so",
+      "type": "elf",
+      "architecture": "aarch64",
+      "sha256": "2d8e5608c1d6fff3700c0a6659d2553fcd399d3676c8bed3ea22e60c963d2636"
+    }
+  ]
+}

@@ -2,9 +2,9 @@ name: Catalog contract
 
 on:
   push:
-    paths: ["catalog/**", "contract-examples/**", "schemas/**", "tools/catalog-release.py", "tools/validate-catalog.py", "tools/validate-contract.py"]
+    paths: ["catalog/**", "contract-examples/**", "reviews/**", "schemas/**", "tests/audit_package.py", "tools/audit-package.py", "tools/catalog-release.py", "tools/validate-catalog.py", "tools/validate-contract.py"]
   pull_request:
-    paths: ["catalog/**", "contract-examples/**", "schemas/**", "tools/catalog-release.py", "tools/validate-catalog.py", "tools/validate-contract.py"]
+    paths: ["catalog/**", "contract-examples/**", "reviews/**", "schemas/**", "tests/audit_package.py", "tools/audit-package.py", "tools/catalog-release.py", "tools/validate-catalog.py", "tools/validate-contract.py"]
 
 jobs:
   validate:
@@ -21,3 +21,5 @@ jobs:
       - run: check-jsonschema --schemafile schemas/catalog-v3.schema.json contract-examples/catalog-v3.json
       - run: python3 tools/validate-contract.py submission contract-examples/submission-v1.json
       - run: python3 tools/validate-contract.py catalog contract-examples/catalog-v3.json
+      - run: check-jsonschema --schemafile schemas/audit-report-v1.schema.json reviews/*/*.json
+      - run: python3 tests/audit_package.py

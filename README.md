@@ -15,6 +15,11 @@ Client catalogue is specified in
 immutable revisions, package variants, provenance, review records and signed
 revocations while retaining catalogue v2 during migration.
 
+Publisher packages can be checked without extraction or execution using
+`tools/audit-package.py`. The automatic rejection rules, human-review warnings
+and report format are documented in
+[docs/PORT-SECURITY.md](docs/PORT-SECURITY.md).
+
 The package includes the official mirror list and Ed25519 public key. The app
 discovers the newest signed head, downloads its single-file catalogue through
 the persistent aria2 daemon, atomically activates it, and keeps the torrent
