@@ -20,7 +20,7 @@ python_binary=${KMP_PYTHON:-}
 if [ -z "$python_binary" ]; then
   python_binary=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
 fi
-daemon_version=4
+daemon_version=5
 
 valid_pid() {
   [ -f "$pid_file" ] || return 1
@@ -111,8 +111,12 @@ case "$command_name" in
     fi
     listen_port=$(read_setting listen_port 6881)
     upload_limit=$(read_setting upload_limit 100K)
+    max_concurrent_downloads=$(read_setting max_concurrent_downloads 50)
     case "$rpc_port:$listen_port" in *[!0-9:]*) printf 'porta inválida\n' >&2; exit 1 ;; esac
     case "$upload_limit" in *[!0-9KMGkmg]*) printf 'limite de upload inválido\n' >&2; exit 1 ;; esac
+    case "$max_concurrent_downloads" in
+      ''|*[!0-9]*|0) printf 'limite de downloads simultâneos inválido\n' >&2; exit 1 ;;
+    esac
     write_env
     if [ -f "$log_file" ] && [ "$(wc -c < "$log_file")" -gt 1048576 ]; then
       mv "$log_file" "$log_file.old"
@@ -126,7 +130,7 @@ case "$command_name" in
       --enable-dht=true --enable-peer-exchange=true --bt-enable-lpd=true \
       --listen-port="$listen_port" --dht-listen-port="$listen_port" \
       --seed-ratio=0 --max-overall-upload-limit="$upload_limit" \
-      --max-concurrent-downloads=5 --dir="$download_dir" \
+      --max-concurrent-downloads="$max_concurrent_downloads" --dir="$download_dir" \
       --console-log-level=warn < /dev/null >> "$log_file" 2>&1 &
     daemon_pid=$!
     printf '%s\n' "$daemon_pid" > "$pid_file"

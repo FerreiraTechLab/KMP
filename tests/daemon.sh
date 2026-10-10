@@ -12,6 +12,7 @@ trap cleanup EXIT
 
 cat > "$test_dir/fake-aria2c" <<'EOF'
 #!/bin/sh
+printf '%s\n' "$@" > "$(dirname "$0")/aria2.args"
 while :; do sleep 1; done
 EOF
 chmod +x "$test_dir/fake-aria2c"
@@ -25,6 +26,7 @@ kill -0 "$first_monitor_pid"
 grep '^KMP_ARIA2_RPC=http://127.0.0.1:26801/jsonrpc$' "$test_dir/first.env" >/dev/null
 grep -E '^KMP_ARIA2_SECRET=[0-9a-f]{32}$' "$test_dir/first.env" >/dev/null
 [ "$(stat -c %a "$test_dir/state/rpc.secret")" = 600 ]
+grep '^--max-concurrent-downloads=50$' "$test_dir/aria2.args" >/dev/null
 
 "$repo_dir/KMP/daemon.sh" start "$test_dir/fake-aria2c" \
   "$test_dir/state" "$test_dir/downloads" > "$test_dir/second.env"
