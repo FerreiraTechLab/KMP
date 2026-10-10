@@ -18,6 +18,99 @@ local function safePath(value)
     return true
 end
 
+local function contains(values, needle)
+    if type(values) ~= "table" then return false end
+    for _, value in ipairs(values) do if value == needle then return true end end
+    return false
+end
+
+local function stringSet(value)
+    local result = {}
+    for part in tostring(value or ""):gmatch("[^,]+") do result[part] = true end
+    return result
+end
+
+function Catalog.deviceProfile(environment)
+    environment = environment or os.getenv
+    return {
+        architecture = environment("KMP_DEVICE_ARCH") or "",
+        firmware = environment("KMP_FIRMWARE") or "",
+        ramMB = tonumber(environment("KMP_RAM_MB")),
+        analogSticks = tonumber(environment("KMP_ANALOG_STICKS")),
+        renderers = stringSet(environment("KMP_RENDERERS")),
+        runtimes = stringSet(environment("KMP_RUNTIMES")),
+        capabilities = { ["org.ferreiratechlab.catalog-v3"] = true },
+    }
+end
+
+local function compatible(variant, profile)
+    local compatibility, requirements = variant.compatibility, variant.requirements
+    if type(compatibility) ~= "table" or type(requirements) ~= "table" then return false end
+    if not contains(compatibility.architectures, profile.architecture) then return false end
+    local firmwares = compatibility.firmwares or {}
+    if contains(firmwares.exclude, profile.firmware) then return false end
+    if firmwares.include and not contains(firmwares.include, profile.firmware) then return false end
+    for _, capability in ipairs(variant.requiredCapabilities or {}) do
+        if not profile.capabilities[capability] then return false end
+    end
+    if requirements.minimumRamMB and
+       (not profile.ramMB or profile.ramMB < requirements.minimumRamMB) then return false end
+    if requirements.analogSticks and requirements.analogSticks > 0 and
+       (not profile.analogSticks or profile.analogSticks < requirements.analogSticks) then return false end
+    if type(requirements.renderers) ~= "table" or type(requirements.runtimes) ~= "table" then return false end
+    if #requirements.renderers > 0 then
+        local found = false
+        for _, renderer in ipairs(requirements.renderers) do
+            if profile.renderers[renderer] then found = true; break end
+        end
+        if not found then return false end
+    end
+    for _, runtime in ipairs(requirements.runtimes) do
+        if not profile.runtimes[runtime] then return false end
+    end
+    return true
+end
+
+local function selectVariant(item, profile)
+    local release = item.release
+    if type(release) ~= "table" or type(release.variants) ~= "table" or #release.variants == 0 then
+        return nil, "release sem variantes"
+    end
+    local selected
+    for _, variant in ipairs(release.variants) do
+        if not safeId(variant.id) or type(variant.priority) ~= "number" or
+           variant.priority % 1 ~= 0 or variant.priority < 0 then
+            return nil, "variante inválida"
+        end
+        if compatible(variant, profile) then
+            if not selected or variant.priority > selected.priority then
+                selected = variant
+            elseif variant.priority == selected.priority then
+                return nil, "variantes compatíveis empatadas"
+            end
+        end
+    end
+    return selected
+end
+
+local function normalizeV3(item, variant)
+    local release, download = item.release, variant.download
+    if type(download) ~= "table" or type(variant.install) ~= "table" then return nil end
+    return {
+        id = item.id, name = item.name, description = item.description,
+        license = item.license, homepage = item.homepage, source = item.source,
+        porter = item.porter, redistribution = item.redistribution,
+        version = release.version, revision = release.revision,
+        channel = release.channel, review = release.review,
+        variantId = variant.id, compatibility = variant.compatibility,
+        requirements = variant.requirements,
+        sizeBytes = download.sizeBytes, infoHash = download.infoHash,
+        magnet = download.magnet, torrent = download.torrent,
+        packageFile = download.packageFile, packageSha256 = download.sha256,
+        install = variant.install,
+    }
+end
+
 local function validateItem(item, ids, portIds, roots, requirePackageHash)
     if type(item) ~= "table" then return nil, "item não é um objeto" end
     if not safeId(item.id) then return nil, "id inválido" end
@@ -72,15 +165,15 @@ local function validateItem(item, ids, portIds, roots, requirePackageHash)
     return item
 end
 
-function Catalog.validate(document)
+function Catalog.validate(document, profile)
     if type(document) ~= "table" or type(document.items) ~= "table" then
         return nil, "versão ou formato do catálogo inválido"
     end
-    if document.schemaVersion == 2 then
+    if document.schemaVersion == 2 or document.schemaVersion == 3 then
         if type(document.sequence) ~= "number" or document.sequence < 1 or
            document.sequence % 1 ~= 0 or type(document.generatedAt) ~= "string" or
            not document.generatedAt:match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then
-            return nil, "metadados do catálogo 2 inválidos"
+            return nil, "metadados do catálogo inválidos"
         end
     elseif document.schemaVersion ~= 1 then
         return nil, "versão ou formato do catálogo inválido"
@@ -89,14 +182,36 @@ function Catalog.validate(document)
     local portIds = {}
     local roots = {}
     local items = {}
-    for index, item in ipairs(document.items) do
-        local valid, err = validateItem(item, ids, portIds, roots,
-            document.schemaVersion == 2 and document.sequence >= 3)
-        if not valid then return nil, "item " .. index .. ": " .. err end
-        items[#items + 1] = valid
+    local incompatible = 0
+    profile = profile or Catalog.deviceProfile()
+    for index, source in ipairs(document.items) do
+        local item = source
+        if document.schemaVersion == 3 then
+            if type(source) ~= "table" or not safeId(source.id) or
+               not nonempty(source.name) or not nonempty(source.description) or
+               not nonempty(source.license) or type(source.release) ~= "table" or
+               type(source.release.revision) ~= "number" or source.release.revision < 1 or
+               source.release.revision % 1 ~= 0 or not nonempty(source.release.version) or
+               source.release.channel ~= "stable" then
+                return nil, "item " .. index .. ": release v3 inválida"
+            end
+            local variant, variantError = selectVariant(source, profile)
+            if variantError then return nil, "item " .. index .. ": " .. variantError end
+            if not variant then incompatible = incompatible + 1; item = nil
+            else item = normalizeV3(source, variant) end
+        end
+        local valid, err
+        if item then
+            valid, err = validateItem(item, ids, portIds, roots,
+                document.schemaVersion == 3 or
+                (document.schemaVersion == 2 and document.sequence >= 3))
+        end
+        if item and not valid then return nil, "item " .. index .. ": " .. err end
+        if valid then items[#items + 1] = valid end
     end
     return items, nil, {schemaVersion = document.schemaVersion,
-        sequence = document.sequence, generatedAt = document.generatedAt}
+        sequence = document.sequence, generatedAt = document.generatedAt,
+        incompatible = incompatible, revocations = document.revocations or {}}
 end
 
 function Catalog.search(items, query)
@@ -108,7 +223,10 @@ function Catalog.search(items, query)
     return result
 end
 
-function Catalog.isUpdate(installed, available)
+function Catalog.isUpdate(installed, available, installedRevision, availableRevision)
+    if type(installedRevision) == "number" and type(availableRevision) == "number" then
+        return availableRevision > installedRevision
+    end
     installed, available = tostring(installed or ""), tostring(available or "")
     if installed == "" or available == "" or installed == available then return false end
     local function numericParts(value)

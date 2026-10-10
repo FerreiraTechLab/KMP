@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.26
+# KDownloader PM v0.2.27
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -38,7 +38,7 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.26.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.27.zip`; its contents match the layout in `KMP/port.json`.
 
 The portable dependency policy and reproducible download procedure are in
 `docs/PORTABLE-RUNTIME.md`.
@@ -76,6 +76,13 @@ When the signed catalogue publishes a version different from the installed
 manifest, the client shows both versions and offers an update. Updates replace
 package-owned files, preserve user-created saves and settings, and use a
 persistent journal to restore the previous version after an interruption.
+
+Catalogue v3 items can provide multiple device variants. The launcher reports
+the firmware, architecture, memory, controls, renderers and installed
+PortMaster runtimes; the client selects exactly one compatible variant and
+orders updates by the immutable integer `revision`. Installation manifests
+record the selected variant and package SHA-256. Signed revocations can warn
+about an installed package or block a compromised package from installation.
 
 ## Development
 

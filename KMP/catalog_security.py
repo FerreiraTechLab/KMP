@@ -153,7 +153,134 @@ def _safe_path(value: object) -> bool:
     return all(part not in {".", ".."} for part in value.split("/"))
 
 
+def _validate_v3_catalog(document: dict, sequence: int) -> None:
+    if document.get("sequence") != sequence:
+        raise VerificationError("sequência do catálogo não confere")
+    if not isinstance(document.get("generatedAt"), str):
+        raise VerificationError("generatedAt do catálogo inválido")
+    parse_time(document["generatedAt"], "generatedAt")
+    items, revocations = document.get("items"), document.get("revocations")
+    if not isinstance(items, list) or not isinstance(revocations, list):
+        raise VerificationError("itens ou revogações do catálogo inválidos")
+    blocked, revoked_hashes = set(), set()
+    for index, revocation in enumerate(revocations, 1):
+        prefix = f"revogação {index}: "
+        if not isinstance(revocation, dict):
+            raise VerificationError(prefix + "formato inválido")
+        digest, action = revocation.get("packageSha256"), revocation.get("action")
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in HEX64 for c in digest):
+            raise VerificationError(prefix + "SHA-256 inválido")
+        if digest in revoked_hashes or action not in {"warn", "block-install"}:
+            raise VerificationError(prefix + "entrada duplicada ou ação inválida")
+        if not isinstance(revocation.get("reason"), str) or not revocation["reason"].strip():
+            raise VerificationError(prefix + "motivo ausente")
+        parse_time(revocation.get("publishedAt"), "publishedAt")
+        revoked_hashes.add(digest)
+        if action == "block-install":
+            blocked.add(digest)
+    ids, port_owners, root_owners, package_hashes = set(), {}, {}, set()
+    for index, item in enumerate(items, 1):
+        prefix = f"item {index}: "
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or \
+                not SAFE_ID.fullmatch(item["id"]) or item["id"] in ids:
+            raise VerificationError(prefix + "id inválido ou duplicado")
+        item_id = item["id"]
+        for field in ("name", "description", "license", "homepage", "source"):
+            if not isinstance(item.get(field), str) or not item[field].strip():
+                raise VerificationError(prefix + field + " ausente")
+        release = item.get("release")
+        if not isinstance(release, dict) or not isinstance(release.get("version"), str) or \
+                not release["version"].strip() or not isinstance(release.get("revision"), int) or \
+                isinstance(release.get("revision"), bool) or release["revision"] < 1 or \
+                release.get("channel") not in {"stable", "beta"}:
+            raise VerificationError(prefix + "release inválida")
+        parse_time(release.get("publishedAt"), "publishedAt")
+        review = release.get("review")
+        required_checks = {"zip-layout", "hash", "launcher", "license"}
+        review_checks = review.get("checks") if isinstance(review, dict) else None
+        if not isinstance(review, dict) or review.get("status") != "approved" or \
+                not isinstance(review_checks, list) or \
+                not required_checks.issubset(set(review_checks)):
+            raise VerificationError(prefix + "revisão editorial inválida")
+        variants = release.get("variants")
+        if not isinstance(variants, list) or not variants:
+            raise VerificationError(prefix + "variantes ausentes")
+        variant_ids = set()
+        for variant in variants:
+            variant_id = variant.get("id") if isinstance(variant, dict) else None
+            context = prefix + f"variante {variant_id}: "
+            if not isinstance(variant_id, str) or not SAFE_ID.fullmatch(variant_id) or \
+                    variant_id in variant_ids:
+                raise VerificationError(context + "id inválido ou duplicado")
+            variant_ids.add(variant_id)
+            priority = variant.get("priority")
+            if not isinstance(priority, int) or isinstance(priority, bool) or not 0 <= priority <= 1000:
+                raise VerificationError(context + "prioridade inválida")
+            capabilities = variant.get("requiredCapabilities")
+            if not isinstance(capabilities, list) or any(not isinstance(value, str) for value in capabilities):
+                raise VerificationError(context + "capacidades inválidas")
+            compatibility, requirements = variant.get("compatibility"), variant.get("requirements")
+            if not isinstance(compatibility, dict) or not isinstance(requirements, dict) or \
+                    not isinstance(compatibility.get("architectures"), list) or \
+                    not compatibility["architectures"]:
+                raise VerificationError(context + "compatibilidade inválida")
+            download = variant.get("download")
+            if not isinstance(download, dict):
+                raise VerificationError(context + "download inválido")
+            size, digest = download.get("sizeBytes"), download.get("sha256")
+            info_hash, magnet = download.get("infoHash"), download.get("magnet")
+            if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= 2**53 - 1:
+                raise VerificationError(context + "sizeBytes inválido")
+            if not isinstance(digest, str) or len(digest) != 64 or any(c not in HEX64 for c in digest):
+                raise VerificationError(context + "SHA-256 inválido")
+            if digest in package_hashes or digest in blocked:
+                raise VerificationError(context + "pacote duplicado ou bloqueado")
+            if not isinstance(info_hash, str) or not INFO_HASH.fullmatch(info_hash) or \
+                    not isinstance(magnet, str) or not re.search(
+                        r"(?:^magnet:\?xt=|[?&]xt=)urn:btih:" + re.escape(info_hash) + r"(?:&|$)",
+                        magnet, re.IGNORECASE):
+                raise VerificationError(context + "magnet ou infoHash inválido")
+            package = download.get("packageFile")
+            if not _safe_path(package) or "/" in package or not package.lower().endswith(".zip"):
+                raise VerificationError(context + "packageFile inválido")
+            try:
+                torrent = base64.b64decode(download.get("torrent"), validate=True)
+            except (binascii.Error, ValueError, TypeError) as exc:
+                raise VerificationError(context + "torrent inválido") from exc
+            if not 1 <= len(torrent) <= 64 * 1024:
+                raise VerificationError(context + "torrent inválido")
+            install = variant.get("install")
+            if not isinstance(install, dict) or not isinstance(install.get("portId"), str) or \
+                    not SAFE_ID.fullmatch(install["portId"]):
+                raise VerificationError(context + "install inválido")
+            owner = port_owners.setdefault(install["portId"], item_id)
+            if owner != item_id:
+                raise VerificationError(context + "portId compartilhado")
+            paths, user_paths = install.get("paths"), install.get("userDataPaths")
+            if not isinstance(paths, list) or not paths or not isinstance(user_paths, list):
+                raise VerificationError(context + "caminhos inválidos")
+            install_roots = set()
+            for path in paths:
+                if not _safe_path(path):
+                    raise VerificationError(context + "caminho de instalação inválido")
+                root = path.rstrip("/").split("/", 1)[0]
+                if root in {".kmp", "KMP"}:
+                    raise VerificationError(context + "caminho reservado")
+                owner = root_owners.setdefault(root, item_id)
+                if owner != item_id:
+                    raise VerificationError(context + "destino compartilhado")
+                install_roots.add(root)
+            for path in user_paths:
+                if not _safe_path(path) or path.rstrip("/").split("/", 1)[0] not in install_roots:
+                    raise VerificationError(context + "userDataPath inválido")
+            package_hashes.add(digest)
+        ids.add(item_id)
+
+
 def validate_catalog_document(document: object, sequence: int) -> None:
+    if isinstance(document, dict) and document.get("schemaVersion") == 3:
+        _validate_v3_catalog(document, sequence)
+        return
     if not isinstance(document, dict) or document.get("schemaVersion") != 2:
         raise VerificationError("schema do catálogo incompatível")
     if document.get("sequence") != sequence:

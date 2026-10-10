@@ -61,6 +61,8 @@ local isMusicPaused = false
 
 local catalog = {}
 local catalogAll = {}
+local catalogRevocations = {}
+local incompatiblePorts = 0
 local selectedIdx = 1
 local fontTitle, fontItem, fontSub, fontSmall
 local syncStatus = "Conectando..."
@@ -100,9 +102,17 @@ local function checkLocalFiles()
         local record = installedRecord(game)
         game.installed = record ~= nil
         game.installedVersion = record and record.version or nil
+        game.installedRevision = record and record.revision or nil
+        game.installedVariantId = record and record.variantId or nil
         game.installedInfoHash = record and record.infoHash or nil
         game.installedPackageFile = record and record.packageFile or nil
-        game.updateAvailable = record ~= nil and Catalog.isUpdate(record.version, game.version)
+        game.installedPackageSha256 = record and record.packageSha256 or nil
+        game.revocation = record and record.packageSha256 and
+            catalogRevocations[record.packageSha256] or nil
+        game.downloadRevocation = game.packageSha256 and
+            catalogRevocations[game.packageSha256] or nil
+        game.updateAvailable = record ~= nil and Catalog.isUpdate(
+            record.version, game.version, record.revision, game.revision)
     end
 end
 
@@ -305,7 +315,7 @@ local function decodeCatalog(content)
             string.format("%.1f KB", item.sizeBytes / 1024) or
             string.format("%.1f MB", item.sizeBytes / 1048576)
     end
-    return items
+    return items, nil, metadata
 end
 
 local function saveCatalogCache(content)
@@ -322,11 +332,11 @@ function finishSync(event)
     local file = io.open(savePath, "r")
     local content = file and file:read("*a") or nil
     if file then file:close() end
-    local items, errorMessage = decodeCatalog(content)
+    local items, errorMessage, metadata = decodeCatalog(content)
     local fromCache = distributed and not event.ok or false
     if not items and not distributed then
         local cached = love.filesystem.read("catalog-cache.json")
-        items = decodeCatalog(cached)
+        items, errorMessage, metadata = decodeCatalog(cached)
         fromCache = items ~= nil
     end
     if not items then
@@ -337,11 +347,19 @@ function finishSync(event)
         return
     end
     catalogAll = items
+    catalogRevocations = {}
+    for _, entry in ipairs((metadata and metadata.revocations) or {}) do
+        catalogRevocations[entry.packageSha256] = entry
+    end
+    incompatiblePorts = metadata and metadata.incompatible or 0
     applySearch()
     if not fromCache and not distributed then saveCatalogCache(content) end
     checkLocalFiles()
     local mode = distributed and "Distribuído" or "Online"
     syncStatus = (fromCache and "Offline" or mode) .. " (" .. #catalogAll .. " ports)"
+    if incompatiblePorts > 0 then
+        syncStatus = syncStatus .. " | " .. incompatiblePorts .. " incompatível(is)"
+    end
     download.statusText = fromCache and "Usando catálogo salvo." or "Lista sincronizada com sucesso!"
     download.statusColor = {0.2, 0.85, 0.45}
     isOffline = fromCache
@@ -682,6 +700,11 @@ end
 
 function startDownload(game, peerOnly, updateMode)
     if not game or download.active or (game.installed and not updateMode) then return end
+    if game.downloadRevocation and game.downloadRevocation.action == "block-install" then
+        download.statusText = "Instalação bloqueada: " .. tostring(game.downloadRevocation.reason)
+        download.statusColor = {1.0, 0.3, 0.3}
+        return
+    end
     return startTorrentDownload(game, peerOnly == true, updateMode == true)
 end
 
@@ -1726,10 +1749,13 @@ function love.draw()
             love.graphics.setColor(0.5, 0.6, 0.7)
             love.graphics.printf("Destino: " .. sdLabels[currentSd], 90, 245, 460, "center")
             if game.installed then
-                love.graphics.setColor(game.updateAvailable and 0.95 or 0.2,
-                    game.updateAvailable and 0.65 or 0.85,
-                    game.updateAvailable and 0.2 or 0.45)
-                love.graphics.printf(game.updateAvailable and "ATUALIZAÇÃO DISPONÍVEL" or "INSTALADO",
+                local revoked = game.revocation ~= nil
+                love.graphics.setColor(revoked and 1.0 or (game.updateAvailable and 0.95 or 0.2),
+                    revoked and 0.3 or (game.updateAvailable and 0.65 or 0.85),
+                    revoked and 0.3 or (game.updateAvailable and 0.2 or 0.45))
+                love.graphics.printf(revoked and "ALERTA DE SEGURANÇA: " ..
+                    tostring(game.revocation.reason):sub(1, 48) or
+                    (game.updateAvailable and "ATUALIZAÇÃO DISPONÍVEL" or "INSTALADO"),
                     90, 270, 460, "center")
                 love.graphics.setColor(0.68, 0.76, 0.86)
                 local seedText = "Semeacao: consultando..."

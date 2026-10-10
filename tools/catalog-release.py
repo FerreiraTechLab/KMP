@@ -10,7 +10,11 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "KMP"))
+from catalog_security import VerificationError, validate_catalog_document
 
 
 def timestamp(value: datetime) -> str:
@@ -42,17 +46,21 @@ def main() -> int:
 
     raw = args.catalog.read_bytes()
     document = json.loads(raw)
-    if not isinstance(document, dict) or document.get("schemaVersion") != 2:
-        parser.error("o catálogo precisa usar schemaVersion 2")
+    if not isinstance(document, dict) or document.get("schemaVersion") not in (2, 3):
+        parser.error("o catálogo precisa usar schemaVersion 2 ou 3")
     sequence = document.get("sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         parser.error("sequence precisa ser um inteiro positivo")
-    if sequence >= 3:
+    if document["schemaVersion"] == 2 and sequence >= 3:
         for index, item in enumerate(document.get("items", []), 1):
             digest = item.get("packageSha256") if isinstance(item, dict) else None
             if not isinstance(digest, str) or len(digest) != 64 or any(
                     char not in "0123456789abcdef" for char in digest):
                 parser.error(f"item {index}: packageSha256 obrigatório desde a sequência 3")
+    try:
+        validate_catalog_document(document, sequence)
+    except VerificationError as exc:
+        parser.error(str(exc))
     if not args.magnet.startswith("magnet:?xt=urn:btih:"):
         parser.error("magnet inválido")
     if not args.private_key.is_file():

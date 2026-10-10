@@ -18,6 +18,7 @@ class InstallTests(unittest.TestCase):
         self.package = self.base / "example.zip"
         self.item = {
             "id": "example", "version": "1", "infoHash": "a" * 40,
+            "revision": 7, "variantId": "aarch64-portmaster",
             "packageFile": "example.zip", "sizeBytes": 1024,
             "install": {"portId": "example", "paths": ["example.sh", "example/"]},
         }
@@ -36,6 +37,9 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((self.base / "example.sh").is_file())
         self.assertTrue((self.base / "example.sh").stat().st_mode & 0o111)
         self.assertEqual(json.loads(manifest.read_text())["files"], ["example.sh", "example/data.txt"])
+        record = json.loads(manifest.read_text())
+        self.assertEqual(record["revision"], 7)
+        self.assertEqual(record["variantId"], "aarch64-portmaster")
         with self.assertRaisesRegex(ValueError, "já instalado"):
             module.install(self.package, self.base, self.item)
         (self.base / "example" / "user.txt").write_text("keep")

@@ -137,6 +137,34 @@ class CatalogSecurityTest(unittest.TestCase):
         document["items"][0]["packageSha256"] = "b" * 64
         SECURITY.validate_catalog_document(document, 3)
 
+    def test_catalog_v3_contract_is_accepted_and_blocked_package_is_rejected(self):
+        document = json.loads((ROOT / "contract-examples/catalog-v3.json").read_text())
+        SECURITY.validate_catalog_document(document, document["sequence"])
+        digest = document["items"][0]["release"]["variants"][0]["download"]["sha256"]
+        document["revocations"] = [{
+            "packageSha256": digest, "action": "block-install", "reason": "teste",
+            "publishedAt": "2026-10-10T23:30:00Z",
+        }]
+        with self.assertRaisesRegex(SECURITY.VerificationError, "bloqueado"):
+            SECURITY.validate_catalog_document(document, document["sequence"])
+
+    def test_catalog_release_tool_accepts_v3(self):
+        output = self.root / "release-v3"
+        source = ROOT / "contract-examples/catalog-v3.json"
+        subprocess.run([
+            "python3", str(ROOT / "tools/catalog-release.py"), str(source),
+            "--private-key", str(self.private_key),
+            "--magnet", "magnet:?xt=urn:btih:" + "c" * 40,
+            "--output", str(output),
+        ], check=True, stdout=subprocess.DEVNULL)
+        head = SECURITY.load_verified_head(
+            output / "head.json", output / "head.json.sig", self.public_key
+        )
+        raw = SECURITY.verify_catalog(
+            output / "catalog-00000006.json", head, self.public_key
+        )
+        self.assertEqual(json.loads(raw)["schemaVersion"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

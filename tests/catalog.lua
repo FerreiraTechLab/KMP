@@ -21,6 +21,8 @@ assert(Catalog.isUpdate("1.1.1", "1.2.0"))
 assert(not Catalog.isUpdate("1.2.0", "1.1.1"))
 assert(not Catalog.isUpdate("1.1", "1.1.0"))
 assert(Catalog.isUpdate("custom-a", "custom-b"))
+assert(Catalog.isUpdate("release-x", "release-y", 2, 3))
+assert(not Catalog.isUpdate("release-x", "release-y", 3, 2))
 
 document.items[1].install.paths = {"../escape"}
 assert(Catalog.validate(document) == nil)
@@ -53,4 +55,22 @@ document.items[1].packageSha256 = string.rep("a", 64)
 assert(Catalog.validate(document) ~= nil)
 document.schemaVersion = 3
 assert(Catalog.validate(document) == nil)
+
+local Json = require("json")
+local handle = assert(io.open("contract-examples/catalog-v3.json", "r"))
+local v3document = assert(Json.decode(handle:read("*a")))
+handle:close()
+local profile = {
+    architecture = "aarch64", firmware = "darkos", ramMB = 1024,
+    analogSticks = 2, renderers = {gles2 = true}, runtimes = {love_11_5 = true},
+    capabilities = {["org.ferreiratechlab.catalog-v3"] = true},
+}
+local v3items, v3error, v3metadata = Catalog.validate(v3document, profile)
+assert(v3items and not v3error and #v3items == 1)
+assert(v3items[1].variantId == "aarch64-portmaster")
+assert(v3items[1].revision == 1 and v3items[1].packageSha256 == string.rep("a", 64))
+assert(v3metadata.schemaVersion == 3 and v3metadata.incompatible == 0)
+profile.architecture = "armhf"
+local incompatible, _, incompatibleMetadata = Catalog.validate(v3document, profile)
+assert(incompatible and #incompatible == 0 and incompatibleMetadata.incompatible == 1)
 print("catalog tests: ok")

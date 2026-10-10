@@ -37,6 +37,30 @@ export KMP_INSTALLER="$GAMEDIR/install.py"
 export KMP_CATALOG_SYNC="$GAMEDIR/catalog_sync.py"
 export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
 
+runtime_arch=${DEVICE_ARCH:-$(uname -m)}
+[ "$runtime_arch" = "arm64" ] && runtime_arch=aarch64
+export KMP_DEVICE_ARCH="$runtime_arch"
+firmware_name=$(printf '%s' "${CFW_NAME:-unknown}" | tr '[:upper:]' '[:lower:]')
+case "$firmware_name" in
+  *darkos*) firmware_name=darkos ;;
+  *rocknix*) firmware_name=rocknix ;;
+  *aurknix*) firmware_name=aurknix ;;
+  *) firmware_name=$(printf '%s' "$firmware_name" | tr -cs 'a-z0-9_-' '_') ;;
+esac
+export KMP_FIRMWARE="${firmware_name%_}"
+export KMP_RAM_MB="$(awk '/^MemTotal:/ {print int($2 / 1024); exit}' /proc/meminfo 2>/dev/null)"
+export KMP_ANALOG_STICKS="${KMP_ANALOG_STICKS:-2}"
+export KMP_RENDERERS="${KMP_RENDERERS:-gles2,opengl}"
+runtime_list=""
+if [ -d "$controlfolder/runtimes" ]; then
+  for runtime_path in "$controlfolder"/runtimes/*; do
+    [ -d "$runtime_path" ] || continue
+    runtime_name=$(printf '%s' "${runtime_path##*/}" | tr '.-' '__')
+    runtime_list="${runtime_list}${runtime_list:+,}${runtime_name}"
+  done
+fi
+export KMP_RUNTIMES="$runtime_list"
+
 if command -v python3 >/dev/null 2>&1; then
   export KMP_PYTHON="$(command -v python3)"
 elif command -v python >/dev/null 2>&1; then
@@ -84,8 +108,6 @@ fi
 
 # Prefer a PortMaster-local BitTorrent client; fall back to the firmware package.
 # The application reports a missing backend when neither is available.
-runtime_arch=${DEVICE_ARCH:-$(uname -m)}
-[ "$runtime_arch" = "arm64" ] && runtime_arch=aarch64
 bundled_aria2="$GAMEDIR/libs.${runtime_arch}/aria2c"
 if [ -f "$bundled_aria2" ]; then
   chmod +x "$bundled_aria2" 2>/dev/null || true

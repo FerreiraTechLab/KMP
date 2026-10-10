@@ -57,7 +57,7 @@ snapshot aceito quando for seguro.
 - [x] Adicionar `packageSha256` a cada pacote.
 - [x] Fechar o contrato Publisher → revisão → Client para catálogo v3.
 - [x] Especificar variantes por firmware, arquitetura e requisitos de hardware.
-- [ ] Implementar seleção das variantes v3 no Client.
+- [x] Implementar seleção das variantes v3 no Client.
 - [x] Manter compatibilidade explícita com o schema 2 durante a migração.
 
 Critério de conclusão: uma proposta inválida é rejeitada antes de chegar à

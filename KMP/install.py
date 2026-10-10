@@ -316,7 +316,9 @@ def install(zip_path, base_path, item, checkpoint=None):
         transaction_dir.mkdir(parents=True, exist_ok=True)
         record = {
             "id": item["id"], "version": item["version"],
+            "revision": item.get("revision"), "variantId": item.get("variantId"),
             "infoHash": item["infoHash"], "portId": port_id,
+            "packageSha256": item.get("packageSha256"),
             "catalogSequence": item.get("catalogSequence", 0),
             "packageFile": item["packageFile"], "files": files, "roots": roots,
         }
@@ -414,7 +416,9 @@ def update(zip_path, base_path, item, checkpoint=None):
         transaction_dir.mkdir(parents=True, exist_ok=True)
         record = {
             "id": item["id"], "version": item["version"],
+            "revision": item.get("revision"), "variantId": item.get("variantId"),
             "infoHash": item["infoHash"], "portId": port_id,
+            "packageSha256": item.get("packageSha256"),
             "catalogSequence": item.get("catalogSequence", 0),
             "packageFile": item["packageFile"], "files": files, "roots": new_roots,
         }
