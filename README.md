@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.31
+# KDownloader PM v0.2.33
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -43,7 +43,16 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.31.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.33.zip`; its contents match the layout in `KMP/port.json`.
+
+The signed catalogue can publish a reserved `kmp-client` item. When its version
+is newer, the options menu offers the Client update without listing it as a
+port. KMP downloads the same ZIP through BitTorrent or HTTPS, verifies the
+catalogue signature and package SHA-256, validates the archive, and stages it
+outside the live application directory. The launcher applies it only after the
+interface exits. A persistent journal restores the previous Client after an
+interruption; catalogue state, settings, diagnostics and local peer settings
+are preserved.
 
 For support, open the options menu and select **Exportar diagnostico**. The
 client writes a bounded, redacted ZIP inside the installed
@@ -122,6 +131,7 @@ python3 tests/install.py
 python3 tests/rpc_http.py
 python3 tests/catalog_security.py
 python3 tests/catalog_sync.py
+python3 tests/self_update.py
 bash tests/daemon.sh
 luac -p KMP/game/*.lua
 bash -n KMP.sh

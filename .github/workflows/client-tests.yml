@@ -21,4 +21,5 @@ jobs:
       - run: lua tests/main_smoke.lua
       - run: lua tests/main_controls.lua
       - run: KMP_TEST_MODE=1 lua tests/main_flows.lua
+      - run: python3 tests/self_update.py
       - run: bash -n KMP.sh KMP/daemon.sh

@@ -88,11 +88,18 @@ das verificações e decisão de revisão rastreáveis.
 
 ### P2 — manutenção do cliente
 
+- [x] Implementar atualização assinada e transacional do próprio KMP Client.
 - [x] Implementar atualização de ports já instalados.
 - [x] Mostrar versão instalada e versão disponível separadamente.
 - [x] Melhorar logs exportáveis para suporte.
 - [x] Testar restauração da sessão aria2 e política de bateria no hardware.
 - [x] Criar testes de interface para todos os fluxos do controle.
+
+Critério de conclusão: o Client reconhece somente uma versão mais recente no
+catálogo assinado, valida hash e estrutura do ZIP, aplica a troca depois de
+fechar a interface e recupera a versão anterior se a energia for interrompida
+antes do commit. Configurações, estado do catálogo e diagnósticos permanecem no
+aparelho.
 
 ## Planejamento reservado do KMP Publisher
 

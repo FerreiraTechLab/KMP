@@ -26,7 +26,7 @@ dofile("KMP/game/main.lua")
 love.load()
 love.update(2.1)
 love.gamepadpressed(nil, "start")
-for _ = 1, 4 do love.gamepadpressed(nil, "dpdown") end
+for _ = 1, 5 do love.gamepadpressed(nil, "dpdown") end
 love.gamepadpressed(nil, "a")
 assert(not quitCalled, "Exportar diagnostico não deve sair do aplicativo")
 love.gamepadpressed(nil, "b")

@@ -6,6 +6,7 @@ local graphics = setmetatable({}, {__index = function() return function() end en
 graphics.getDimensions = function() return 640, 480 end
 graphics.newFont = function() return {} end
 local channels = {}
+local quitCalled = false
 local function channel(name)
     if not channels[name] then
         local queue = {}
@@ -27,7 +28,7 @@ love = {
         write = function() return true end, getSaveDirectory = function() return "/tmp" end},
     thread = {getChannel = channel},
     timer = {getTime = os.clock, sleep = function() end},
-    event = {quit = function() error("quit real no modo de teste") end},
+    event = {quit = function() quitCalled = true end},
 }
 
 dofile("KMP/game/main.lua")
@@ -134,26 +135,47 @@ assert(api.snapshot().appState == "catalog_trust")
 love.gamepadpressed(nil, "b")
 assert(api.snapshot().showMenu)
 api.reset()
-openMenuItem(5)
+openMenuItem(6)
 assert(event("diagnostic") and api.snapshot().diagnostic.ok)
 love.gamepadpressed(nil, "b")
 assert(api.snapshot().showMenu)
+
+-- O Client baixa a própria atualização e pede confirmação antes de sair.
+api.reset()
+local client = game({id = "kmp-client", name = "KMP Client", version = "9.0",
+    isClientUpdate = true, install = {portId = "kmp-client", paths = {"KMP.sh", "KMP/"}}})
+api.setClientUpdate(client)
+openMenuItem(5)
+assert(event("client_update") and api.snapshot().downloadActive)
+channel("torrent_event"):push({kind = "client_ready"})
+love.update(0.1)
+assert(api.snapshot().showClientUpdatePopup)
+love.gamepadpressed(nil, "b")
+assert(not api.snapshot().showClientUpdatePopup and not quitCalled)
+
+api.reset()
+api.setClientUpdate(client)
+openMenuItem(5)
+channel("torrent_event"):push({kind = "client_ready"})
+love.update(0.1)
+love.gamepadpressed(nil, "a")
+assert(event("apply_client_update") and quitCalled)
 
 -- Atualizar, sair, reiniciar e desligar geram as ações corretas sem executá-las.
 api.reset()
 love.gamepadpressed(nil, "y")
 assert(event("reload"))
 api.reset()
-openMenuItem(6)
+openMenuItem(7)
 love.gamepadpressed(nil, "a")
 assert(event("exit"))
 api.reset()
-openMenuItem(6)
+openMenuItem(7)
 love.gamepadpressed(nil, "dpdown")
 love.gamepadpressed(nil, "a")
 assert(event("reboot"))
 api.reset()
-openMenuItem(6)
+openMenuItem(7)
 love.gamepadpressed(nil, "dpdown")
 love.gamepadpressed(nil, "dpdown")
 love.gamepadpressed(nil, "a")

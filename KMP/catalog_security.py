@@ -259,12 +259,16 @@ def _validate_v3_catalog(document: dict, sequence: int) -> None:
             paths, user_paths = install.get("paths"), install.get("userDataPaths")
             if not isinstance(paths, list) or not paths or not isinstance(user_paths, list):
                 raise VerificationError(context + "caminhos inválidos")
+            client_package = item_id == "kmp-client" and \
+                install["portId"] == "kmp-client" and paths == ["KMP.sh", "KMP/"]
+            if item_id == "kmp-client" and not client_package:
+                raise VerificationError(context + "destinos da atualização do Client inválidos")
             install_roots = set()
             for path in paths:
                 if not _safe_path(path):
                     raise VerificationError(context + "caminho de instalação inválido")
                 root = path.rstrip("/").split("/", 1)[0]
-                if root in {".kmp", "KMP"}:
+                if root == ".kmp" or (root == "KMP" and not client_package):
                     raise VerificationError(context + "caminho reservado")
                 owner = root_owners.setdefault(root, item_id)
                 if owner != item_id:

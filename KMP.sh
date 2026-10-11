@@ -2,6 +2,19 @@
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
+# Recover an interrupted Client update before reading files from KMP/. The
+# recovery helper lives outside that directory so it remains available while
+# KMP/ is atomically replaced.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+CLIENT_UPDATER="$SCRIPT_DIR/.kmp/client-updater.py"
+if [ -f "$SCRIPT_DIR/.kmp/client-update/journal.json" ] && [ -f "$CLIENT_UPDATER" ]; then
+  recovery_python=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
+  if [ -z "$recovery_python" ] || ! "$recovery_python" "$CLIENT_UPDATER" recover "$SCRIPT_DIR"; then
+    printf 'Falha ao recuperar atualização interrompida do KMP.\n' >&2
+    exit 1
+  fi
+fi
+
 if [ -d "/opt/system/Tools/PortMaster/" ]; then
   controlfolder="/opt/system/Tools/PortMaster"
 elif [ -d "/opt/tools/PortMaster/" ]; then
@@ -37,6 +50,7 @@ export KMP_INSTALLER="$GAMEDIR/install.py"
 export KMP_CATALOG_SYNC="$GAMEDIR/catalog_sync.py"
 export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
 export KMP_DIAGNOSTIC="$GAMEDIR/diagnostic.py"
+export KMP_SELF_UPDATE="$GAMEDIR/self_update.py"
 export KMP_GAME_DIR="$GAMEDIR"
 export KMP_CONF_DIR="$CONFDIR"
 export KMP_DIAGNOSTIC_OUTPUT="$GAMEDIR/diagnostics"
@@ -153,6 +167,15 @@ fi
 $GPTOKEYB "$LOVE_GPTK" &
 pm_platform_helper "$LOVE_BINARY"
 $LOVE_RUN "$GAMEDIR/game.love"
+
+if [ -f "$SCRIPT_DIR/.kmp/client-update/pending.json" ] && [ -f "$CLIENT_UPDATER" ]; then
+  printf 'Aplicando atualização verificada do KMP Client...\n'
+  if "$KMP_PYTHON" "$CLIENT_UPDATER" apply "$SCRIPT_DIR"; then
+    printf 'KMP Client atualizado. A nova versão será usada na próxima abertura.\n'
+  else
+    printf 'Falha ao aplicar atualização do KMP; versão anterior restaurada.\n' >&2
+  fi
+fi
 
 printf 'Interface encerrada; restaurando frontend.\n'
 pm_finish

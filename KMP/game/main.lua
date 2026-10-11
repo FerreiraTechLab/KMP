@@ -16,6 +16,7 @@ local CATALOG_ACTIVE = os.getenv("KMP_CATALOG_ACTIVE") or ""
 local PYTHON = os.getenv("KMP_PYTHON") or "python3"
 local TEST_MODE = os.getenv("KMP_TEST_MODE") == "1"
 local DIAGNOSTIC_TOOL = os.getenv("KMP_DIAGNOSTIC") or ""
+local SELF_UPDATE_TOOL = os.getenv("KMP_SELF_UPDATE") or ""
 local GAME_DIR = os.getenv("KMP_GAME_DIR") or ""
 local CONF_DIR = os.getenv("KMP_CONF_DIR") or ""
 local DIAGNOSTIC_OUTPUT = os.getenv("KMP_DIAGNOSTIC_OUTPUT") or ""
@@ -61,6 +62,7 @@ end
 
 local showRestartPopup = false
 local restartPopupTimer = 0
+local showClientUpdatePopup = false
 
 local showUninstallPopup = false
 local gameToUninstall = nil
@@ -77,6 +79,7 @@ local isMusicPaused = false
 local catalog = {}
 local catalogAll = {}
 local catalogRevocations = {}
+local clientUpdate = nil
 local incompatiblePorts = 0
 local selectedIdx = 1
 local fontTitle, fontItem, fontSub, fontSmall
@@ -379,10 +382,24 @@ function finishSync(event)
         isOffline = true
         return
     end
-    catalogAll = items
+    catalogAll = {}
+    clientUpdate = nil
+    for _, item in ipairs(items) do
+        if item.id == "kmp-client" then
+            if Catalog.isUpdate(APP_VERSION, item.version) then
+                item.isClientUpdate = true
+                clientUpdate = item
+            end
+        else
+            table.insert(catalogAll, item)
+        end
+    end
     catalogRevocations = {}
     for _, entry in ipairs((metadata and metadata.revocations) or {}) do
         catalogRevocations[entry.packageSha256] = entry
+    end
+    if clientUpdate and clientUpdate.packageSha256 then
+        clientUpdate.downloadRevocation = catalogRevocations[clientUpdate.packageSha256]
     end
     incompatiblePorts = metadata and metadata.incompatible or 0
     applySearch()
@@ -556,6 +573,13 @@ function love.update(dt)
             checkLocalFiles()
             showRestartPopup = true
             restartPopupTimer = 8
+        elseif torrentEvent.kind == "client_ready" then
+            download.active = false
+            download.phase = "none"
+            download.progress = 100
+            download.statusText = "Atualização do KMP pronta para aplicar."
+            download.statusColor = {0.2, 0.85, 0.45}
+            showClientUpdatePopup = true
         elseif torrentEvent.kind == "error" then
             download.active = false
             download.phase = "none"
@@ -613,7 +637,8 @@ local function startTorrentDownload(game, peerOnly, updateMode)
         download.peerOnly = peerOnly == true
         download.updateMode = updateMode == true
         download.statusText = "Torrent iniciado; procurando fontes..."
-        recordTestEvent(updateMode and "update" or (peerOnly and "p2p_test" or "install"),
+        recordTestEvent(game.isClientUpdate and "client_update" or
+            (updateMode and "update" or (peerOnly and "p2p_test" or "install")),
             {id = game.id})
         return
     end
@@ -627,7 +652,9 @@ local function startTorrentDownload(game, peerOnly, updateMode)
     end
     local basePorts = sdPaths[currentSd]
     local directory = basePorts .. "/.kmp/torrents/" .. game.id
-    if updateMode then
+    if game.isClientUpdate then
+        directory = basePorts .. "/.kmp/client-downloads/" .. game.infoHash:lower()
+    elseif updateMode then
         directory = basePorts .. "/.kmp/updates/" .. game.id .. "-" .. game.infoHash:lower()
     elseif peerOnly then
         directory = basePorts .. "/.kmp/p2p-tests/" .. game.id .. "-" ..
@@ -659,7 +686,8 @@ local function startTorrentDownload(game, peerOnly, updateMode)
     while love.thread.getChannel("torrent_cancel"):pop() do end
 
     local worker = love.thread.newThread([[
-        local python, game, basePorts, directory, endpoint, secret, installer, peerOnly, updateMode = ...
+        local python, game, basePorts, directory, endpoint, secret, installer, selfUpdater,
+            peerOnly, updateMode = ...
         require("love.timer")
         local Json = require("json")
         local Rpc = require("aria2_rpc")
@@ -720,6 +748,28 @@ local function startTorrentDownload(game, peerOnly, updateMode)
                 if not handle then fail("não foi possível registrar o pacote"); return end
                 handle:write(Json.encode(game))
                 handle:close()
+                if game.isClientUpdate then
+                    if not selfUpdater or selfUpdater == "" then
+                        fail("atualizador do KMP indisponível"); return
+                    end
+                    local prepareCommand = quote(python) .. " " .. quote(selfUpdater) ..
+                        " prepare " .. quote(directory .. "/" .. game.packageFile) .. " " ..
+                        quote(basePorts) .. " " .. quote(itemFile) .. " " .. quote(selfUpdater)
+                    local process = io.popen(prepareCommand ..
+                        "; code=$?; printf '\n__KMP_EXIT__=%s\n' \"$code\"")
+                    if not process then fail("preparador de atualização indisponível"); return end
+                    local output = process:read("*a")
+                    process:close()
+                    local exitCode = tonumber((output or ""):match("__KMP_EXIT__=(%d+)"))
+                    if exitCode ~= 0 then
+                        output = (output or ""):gsub("%s*__KMP_EXIT__=%d+%s*$", "")
+                        fail((output ~= "" and output or
+                            "falha ao preparar atualização"):sub(1, 160))
+                        return
+                    end
+                    channel:push({kind = "client_ready"})
+                    return
+                end
                 local operation = updateMode and "update" or "install"
                 local installCommand = quote(python) .. " " .. quote(installer) .. " " .. operation .. " " ..
                     quote(directory .. "/" .. game.packageFile) .. " " ..
@@ -777,7 +827,7 @@ local function startTorrentDownload(game, peerOnly, updateMode)
         end
     ]])
     worker:start(PYTHON, game, basePorts, directory, endpoint, secret, installer,
-        peerOnly == true, updateMode == true)
+        SELF_UPDATE_TOOL, peerOnly == true, updateMode == true)
 end
 
 function love.threaderror(thread, errorMessage)
@@ -997,7 +1047,7 @@ if TEST_MODE then
         reset = function()
             appState = "main"
             showMenu, showSearch, showDetails = false, false, false
-            showUninstallPopup, showRestartPopup = false, false
+            showUninstallPopup, showRestartPopup, showClientUpdatePopup = false, false, false
             menuSelected, powerMenuSelected, selectedIdx = 1, 1, 1
             searchQuery, searchSelected = "", 1
             syncing = false
@@ -1011,6 +1061,7 @@ if TEST_MODE then
             catalogAll, catalog = items, items
             selectedIdx = 1
         end,
+        setClientUpdate = function(item) clientUpdate = item end,
         setInstalledPorts = function(items) testInstalledPorts = items end,
         events = function() return testEvents end,
         snapshot = function()
@@ -1019,6 +1070,7 @@ if TEST_MODE then
                 menuSelected = menuSelected, selectedIdx = selectedIdx,
                 searchQuery = searchQuery, downloadActive = download.active,
                 downloadStatus = download.statusText, diagnostic = diagnostic,
+                clientUpdate = clientUpdate, showClientUpdatePopup = showClientUpdatePopup,
                 installedPorts = #installedPorts}
         end,
     }
@@ -1026,6 +1078,16 @@ end
 
 function love.keypressed(key)
     if appState == "splash" then return end
+
+    if showClientUpdatePopup then
+        if key == "b" or key == "return" then
+            if TEST_MODE then recordTestEvent("apply_client_update") end
+            love.event.quit()
+        elseif key == "a" or key == "space" or key == "escape" or key == "backspace" then
+            showClientUpdatePopup = false
+        end
+        return
+    end
 
     if appState == "diagnostic" then
         if not diagnostic.active and (key == "a" or key == "b" or key == "return" or
@@ -1139,10 +1201,10 @@ function love.keypressed(key)
     if showMenu then
         if key == "up" or key == "w" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 6 end
+            if menuSelected < 1 then menuSelected = 7 end
         elseif key == "down" or key == "s" then
             menuSelected = menuSelected + 1
-            if menuSelected > 6 then menuSelected = 1 end
+            if menuSelected > 7 then menuSelected = 1 end
         elseif key == "b" or key == "return" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -1158,8 +1220,11 @@ function love.keypressed(key)
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
                 showMenu = false
-                startDiagnostic()
+                if clientUpdate then startDownload(clientUpdate) end
             elseif menuSelected == 6 then
+                showMenu = false
+                startDiagnostic()
+            elseif menuSelected == 7 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -1201,6 +1266,16 @@ end
 
 function love.gamepadpressed(joystick, button)
     if appState == "splash" then return end
+
+    if showClientUpdatePopup then
+        if button == "a" then
+            if TEST_MODE then recordTestEvent("apply_client_update") end
+            love.event.quit()
+        elseif button == "b" or button == "back" or button == "start" then
+            showClientUpdatePopup = false
+        end
+        return
+    end
 
     if appState == "diagnostic" then
         if not diagnostic.active and
@@ -1313,10 +1388,10 @@ function love.gamepadpressed(joystick, button)
     if showMenu then
         if button == "dpup" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 6 end
+            if menuSelected < 1 then menuSelected = 7 end
         elseif button == "dpdown" then
             menuSelected = menuSelected + 1
-            if menuSelected > 6 then menuSelected = 1 end
+            if menuSelected > 7 then menuSelected = 1 end
         elseif button == "a" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -1332,8 +1407,11 @@ function love.gamepadpressed(joystick, button)
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
                 showMenu = false
-                startDiagnostic()
+                if clientUpdate then startDownload(clientUpdate) end
             elseif menuSelected == 6 then
+                showMenu = false
+                startDiagnostic()
+            elseif menuSelected == 7 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -1367,7 +1445,8 @@ function love.gamepadpressed(joystick, button)
 end
 
 function love.gamepadaxis(joystick, axis, value)
-    if appState == "splash" or showRestartPopup or showSearch or showDetails or download.active or syncing then return end
+    if appState == "splash" or showRestartPopup or showClientUpdatePopup or showSearch or
+       showDetails or download.active or syncing then return end
     
     if axis == "lefty" then
         if value < -0.6 then
@@ -1378,7 +1457,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavUp()
             elseif showMenu then
                 menuSelected = menuSelected - 1
-                if menuSelected < 1 then menuSelected = 6 end
+                if menuSelected < 1 then menuSelected = 7 end
             elseif not showMenu and appState == "main" then 
                 handleNavUp() 
             end
@@ -1390,7 +1469,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavDown()
             elseif showMenu then
                 menuSelected = menuSelected + 1
-                if menuSelected > 6 then menuSelected = 1 end
+                if menuSelected > 7 then menuSelected = 1 end
             elseif not showMenu and appState == "main" then 
                 handleNavDown() 
             end
@@ -1807,7 +1886,7 @@ function love.draw()
             love.graphics.setColor(1, 1, 1, 0.1)
             love.graphics.line(190, 95, 450, 95)
 
-            local opt1_y = 112
+            local opt1_y = 105
             if menuSelected == 1 then
                 love.graphics.setColor(0.0, 0.82, 1.0, 0.2)
                 love.graphics.rectangle("fill", 190, opt1_y - 6, 260, 36, 6, 6)
@@ -1818,7 +1897,7 @@ function love.draw()
             love.graphics.setFont(fontItem)
             love.graphics.printf("Mudar Destino: " .. sdLabels[currentSd], 170, opt1_y, 300, "center")
 
-            local opt2_y = 157
+            local opt2_y = 147
             if menuSelected == 2 then
                 love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
                 love.graphics.rectangle("fill", 190, opt2_y - 6, 260, 36, 6, 6)
@@ -1828,7 +1907,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Pesquisar por nome", 170, opt2_y, 300, "center")
 
-            local opt3_y = 202
+            local opt3_y = 189
             if menuSelected == 3 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt3_y - 6, 260, 36, 6, 6)
@@ -1838,7 +1917,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Desinstalador de Ports", 170, opt3_y, 300, "center")
 
-            local opt4_y = 247
+            local opt4_y = 231
             if menuSelected == 4 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt4_y - 6, 260, 36, 6, 6)
@@ -1848,7 +1927,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Confianca do Catalogo", 170, opt4_y, 300, "center")
 
-            local opt5_y = 292
+            local opt5_y = 273
             if menuSelected == 5 then
                 love.graphics.setColor(0.2, 0.85, 0.45, 0.2)
                 love.graphics.rectangle("fill", 190, opt5_y - 6, 260, 36, 6, 6)
@@ -1856,21 +1935,34 @@ function love.draw()
                 love.graphics.rectangle("line", 190, opt5_y - 6, 260, 36, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Exportar diagnostico", 170, opt5_y, 300, "center")
+            local clientUpdateText = clientUpdate and
+                ("Atualizar KMP: v" .. tostring(clientUpdate.version)) or
+                ("KMP atualizado: v" .. APP_VERSION)
+            love.graphics.printf(clientUpdateText, 170, opt5_y, 300, "center")
 
-            local opt6_y = 337
+            local opt6_y = 315
             if menuSelected == 6 then
-                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
+                love.graphics.setColor(0.2, 0.85, 0.45, 0.2)
                 love.graphics.rectangle("fill", 190, opt6_y - 6, 260, 36, 6, 6)
-                love.graphics.setColor(1.0, 0.3, 0.3)
+                love.graphics.setColor(0.2, 0.85, 0.45)
                 love.graphics.rectangle("line", 190, opt6_y - 6, 260, 36, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Sair", 170, opt6_y, 300, "center")
+            love.graphics.printf("Exportar diagnostico", 170, opt6_y, 300, "center")
+
+            local opt7_y = 357
+            if menuSelected == 7 then
+                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
+                love.graphics.rectangle("fill", 190, opt7_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1.0, 0.3, 0.3)
+                love.graphics.rectangle("line", 190, opt7_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1, 1, 1)
+            else love.graphics.setColor(0.6, 0.65, 0.75) end
+            love.graphics.printf("Sair", 170, opt7_y, 300, "center")
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("A: Confirmar   B: Voltar", 170, 402, 300, "center")
+            love.graphics.printf("A: Confirmar   B: Voltar", 170, 410, 300, "center")
         end
 
         if showSearch then
@@ -2112,6 +2204,26 @@ function love.draw()
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
             love.graphics.printf("Aperte qualquer botao para fechar", 100, 312, 440, "center")
+        end
+
+        if showClientUpdatePopup then
+            love.graphics.setColor(0, 0, 0, 0.82)
+            love.graphics.rectangle("fill", 0, 0, 640, 480)
+            love.graphics.setColor(0.08, 0.12, 0.18, 0.99)
+            love.graphics.rectangle("fill", 85, 135, 470, 215, 14, 14)
+            love.graphics.setColor(0.2, 0.85, 0.45)
+            love.graphics.setLineWidth(2)
+            love.graphics.rectangle("line", 85, 135, 470, 215, 14, 14)
+            love.graphics.setFont(fontTitle)
+            love.graphics.printf("ATUALIZAÇÃO DO KMP PRONTA", 105, 165, 430, "center")
+            love.graphics.setColor(0.86, 0.9, 0.96)
+            love.graphics.setFont(fontItem)
+            love.graphics.printf("A versão verificada será aplicada depois que\na interface for encerrada.",
+                105, 215, 430, "center")
+            love.graphics.setColor(0.55, 0.68, 0.82)
+            love.graphics.setFont(fontSub)
+            love.graphics.printf("A: aplicar agora e sair   B: aplicar ao sair depois",
+                105, 305, 430, "center")
         end
     end
 

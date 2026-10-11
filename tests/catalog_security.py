@@ -165,6 +165,14 @@ class CatalogSecurityTest(unittest.TestCase):
         )
         self.assertEqual(json.loads(raw)["schemaVersion"], 3)
 
+    def test_reserved_client_package_has_exact_install_roots(self):
+        document = json.loads((ROOT / "catalog/catalog-00000007.json").read_text())
+        SECURITY.validate_catalog_document(document, 7)
+        client = next(item for item in document["items"] if item["id"] == "kmp-client")
+        client["release"]["variants"][0]["install"]["paths"] = ["KMP/"]
+        with self.assertRaisesRegex(SECURITY.VerificationError, "destinos"):
+            SECURITY.validate_catalog_document(document, 7)
+
 
 if __name__ == "__main__":
     unittest.main()

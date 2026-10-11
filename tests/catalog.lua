@@ -70,6 +70,16 @@ assert(v3items and not v3error and #v3items == 1)
 assert(v3items[1].variantId == "aarch64-portmaster")
 assert(v3items[1].revision == 1 and v3items[1].packageSha256 == string.rep("a", 64))
 assert(v3metadata.schemaVersion == 3 and v3metadata.incompatible == 0)
+
+local client = item()
+client.id, client.name, client.version = "kmp-client", "KMP Client", "0.2.32"
+client.packageFile = "KMP-v0.2.32.zip"
+client.install = {portId = "kmp-client", paths = {"KMP.sh", "KMP/"}}
+local clientItems = assert(Catalog.validate({schemaVersion = 1, items = {client}}))
+assert(clientItems[1].id == "kmp-client")
+client.install.paths = {"KMP/"}
+assert(Catalog.validate({schemaVersion = 1, items = {client}}) == nil)
+
 profile.architecture = "armhf"
 local incompatible, _, incompatibleMetadata = Catalog.validate(v3document, profile)
 assert(incompatible and #incompatible == 0 and incompatibleMetadata.incompatible == 1)

@@ -152,11 +152,19 @@ local function validateItem(item, ids, portIds, roots, requirePackageHash)
        type(item.install.paths) ~= "table" or #item.install.paths == 0 then
         return nil, "install inválido"
     end
+    local clientPackage = item.id == "kmp-client" and
+        item.install.portId == "kmp-client" and #item.install.paths == 2 and
+        item.install.paths[1] == "KMP.sh" and item.install.paths[2] == "KMP/"
+    if item.id == "kmp-client" and not clientPackage then
+        return nil, "destinos da atualização do Client inválidos"
+    end
     if portIds[item.install.portId] then return nil, "portId duplicado" end
     for _, path in ipairs(item.install.paths) do
         if not safePath(path) then return nil, "caminho de instalação inválido" end
         local root = path:match("^[^/]+")
-        if root == ".kmp" or root == "KMP" then return nil, "caminho reservado" end
+        if root == ".kmp" or (root == "KMP" and not clientPackage) then
+            return nil, "caminho reservado"
+        end
         if roots[root] and roots[root] ~= item.id then return nil, "destino compartilhado: " .. root end
         roots[root] = item.id
     end

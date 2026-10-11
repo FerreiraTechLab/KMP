@@ -85,6 +85,30 @@ os mesmos bytes; nenhum mirror possui a chave privada.
 Se todas as fontes falharem, o KMP abre o último snapshot válido e mostra modo
 offline. Uma falha nunca apaga o cache válido.
 
+## Atualização do KMP Client
+
+O próprio Client é publicado no catálogo assinado com o identificador reservado
+`kmp-client`. Seu pacote contém exatamente `KMP.sh` e `KMP/`; ele usa o mesmo
+torrent, web seeds, SHA-256, revisão editorial e revogações dos ports. O item
+fica fora da lista de jogos e aparece como ação no menu quando sua versão é
+maior que a versão em execução.
+
+O Client baixa e valida o ZIP enquanto a interface ainda está aberta, mas não
+substitui arquivos carregados. A versão nova é extraída para
+`/roms/ports/.kmp/client-update/`, e uma cópia independente do atualizador fica
+em `/roms/ports/.kmp/client-updater.py`. Após a interface encerrar, o launcher:
+
+1. grava um journal e uma cópia da versão atual;
+2. troca `KMP/` e `KMP.sh` pela versão preparada;
+3. preserva `conf/`, `diagnostics/`, `peer.txt` e `catalog-url.txt`;
+4. confirma a transação apenas após sincronizar os arquivos e diretórios.
+
+Se houver queda de energia, a próxima abertura executa o atualizador externo
+antes de carregar qualquer arquivo de `KMP/`. Uma transação ainda não confirmada
+é revertida; uma transação confirmada mantém a versão nova e apenas conclui a
+limpeza. A primeira versão que inclui este mecanismo precisa ser instalada
+manualmente uma única vez.
+
 ## Autenticidade e rotação de chave
 
 - A chave privada de publicação nunca entra no aplicativo nem no repositório.
