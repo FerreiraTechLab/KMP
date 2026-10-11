@@ -12,6 +12,8 @@ import platform
 import re
 import shutil
 import sys
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 import zipfile
 
 
@@ -116,7 +118,8 @@ def daemon_status(config_dir: Path) -> dict:
             result["running"] = Path("/proc", pid_text).exists()
     except OSError:
         pass
-    settings = {}
+    settings = {"listen_port": "6881", "upload_limit": "100K",
+                "max_concurrent_downloads": "50", "seed_battery_min": "30"}
     try:
         for line in (state_dir / "settings.conf").read_text().splitlines():
             if "=" in line:
@@ -132,14 +135,81 @@ def daemon_status(config_dir: Path) -> dict:
         result["batteryPausedCount"] = len(paused) if isinstance(paused, list) else 0
     except (OSError, ValueError):
         result["batteryPausedCount"] = 0
+    result["torrents"] = torrent_summary(state_dir)
     return result
+
+
+def rpc_credentials(state_dir: Path) -> tuple[str, str] | None:
+    values = {}
+    try:
+        for line in (state_dir / "rpc.env").read_text().splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                values[key] = value.strip()
+    except OSError:
+        return None
+    endpoint = values.get("KMP_ARIA2_RPC", "")
+    secret = values.get("KMP_ARIA2_SECRET", "")
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"} or not secret:
+        return None
+    return endpoint, secret
+
+
+def rpc_call(endpoint: str, secret: str, method: str, parameters: list) -> object:
+    payload = json.dumps({"jsonrpc": "2.0", "id": "kmp-diagnostic", "method": method,
+                          "params": ["token:" + secret, *parameters]}).encode()
+    request = Request(endpoint, data=payload, headers={"Content-Type": "application/json"})
+    with urlopen(request, timeout=3) as response:
+        document = json.loads(response.read())
+    if not isinstance(document, dict) or "result" not in document:
+        raise ValueError("resposta RPC inválida")
+    return document["result"]
+
+
+def summarize_torrents(groups: list[list[dict]]) -> dict:
+    summary = {"total": 0, "active": 0, "waiting": 0, "stopped": 0,
+               "seeding": 0, "paused": 0, "errors": 0}
+    labels = ("active", "waiting", "stopped")
+    for label, items in zip(labels, groups):
+        summary[label] = len(items)
+        summary["total"] += len(items)
+        for item in items:
+            status = item.get("status")
+            if status == "paused":
+                summary["paused"] += 1
+            if status == "error":
+                summary["errors"] += 1
+            if status in {"active", "complete"} and item.get("totalLength") not in {None, "0"} and \
+               item.get("completedLength") == item.get("totalLength"):
+                summary["seeding"] += 1
+    return summary
+
+
+def torrent_summary(state_dir: Path) -> dict:
+    credentials = rpc_credentials(state_dir)
+    if not credentials:
+        return {"available": False}
+    endpoint, secret = credentials
+    keys = ["status", "totalLength", "completedLength"]
+    try:
+        groups = [
+            rpc_call(endpoint, secret, "aria2.tellActive", [keys]),
+            rpc_call(endpoint, secret, "aria2.tellWaiting", [0, 1000, keys]),
+            rpc_call(endpoint, secret, "aria2.tellStopped", [0, 1000, keys]),
+        ]
+        if not all(isinstance(items, list) for items in groups):
+            raise ValueError("lista RPC inválida")
+        return {"available": True, **summarize_torrents(groups)}
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {"available": False, "error": type(exc).__name__}
 
 
 def catalog_status(config_dir: Path) -> dict:
     state = read_json(config_dir / "catalog/state.json")
     active = read_json(config_dir / "catalog/active.json")
     return {
-        "acceptedSequence": state.get("sequence", state.get("acceptedSequence", 0)),
+        "acceptedSequence": state.get("highestSequence", 0),
         "lastTrustedTime": state.get("lastTrustedTime"),
         "activeSchemaVersion": active.get("schemaVersion"),
         "activeSequence": active.get("sequence"),
@@ -156,8 +226,11 @@ def installed_ports(ports_dir: Path) -> list[dict]:
         if path.is_symlink():
             continue
         value = read_json(path)
-        result.append({key: value.get(key) for key in
-                       ("id", "portId", "version", "revision", "variantId", "catalogSequence")})
+        item = {key: value[key] for key in
+                ("id", "portId", "version", "revision", "variantId", "catalogSequence")
+                if key in value}
+        item["manifestFormat"] = "current" if "revision" in value and "variantId" in value else "legacy"
+        result.append(item)
     return result
 
 

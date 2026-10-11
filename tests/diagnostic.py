@@ -43,6 +43,26 @@ class DiagnosticTest(unittest.TestCase):
                 document = json.loads(archive.read("diagnostic.json"))
                 self.assertEqual(document["appVersion"], "0.2.28")
                 self.assertEqual(document["installedPorts"][0]["id"], "example")
+                self.assertEqual(document["installedPorts"][0]["manifestFormat"], "legacy")
+
+    def test_catalog_and_torrent_summaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory)
+            (config / "catalog").mkdir()
+            (config / "catalog/state.json").write_text(
+                '{"highestSequence":6,"lastTrustedTime":"2026-10-11T21:23:27Z"}')
+            (config / "catalog/active.json").write_text(
+                '{"schemaVersion":3,"sequence":6,"items":[{},{}]}')
+            self.assertEqual(MODULE.catalog_status(config)["acceptedSequence"], 6)
+        summary = MODULE.summarize_torrents([
+            [{"status": "active", "totalLength": "10", "completedLength": "10"}],
+            [{"status": "paused", "totalLength": "20", "completedLength": "20"}],
+            [{"status": "error", "totalLength": "0", "completedLength": "0"}],
+        ])
+        self.assertEqual(summary["total"], 3)
+        self.assertEqual(summary["seeding"], 1)
+        self.assertEqual(summary["paused"], 1)
+        self.assertEqual(summary["errors"], 1)
 
     def test_log_tail_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
