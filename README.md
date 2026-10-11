@@ -55,6 +55,9 @@ files and secret files are never included.
 The portable dependency policy and reproducible download procedure are in
 `docs/PORTABLE-RUNTIME.md`.
 
+Hardware results for aria2 session restoration and battery-aware seeding are
+recorded in [docs/HARDWARE-VALIDATION.md](docs/HARDWARE-VALIDATION.md).
+
 Catalogue key rotation, offline backup, and recovery procedures are documented
 in `docs/CATALOG-KEYS.md`.
 

@@ -91,7 +91,7 @@ das verificações e decisão de revisão rastreáveis.
 - [x] Implementar atualização de ports já instalados.
 - [x] Mostrar versão instalada e versão disponível separadamente.
 - [x] Melhorar logs exportáveis para suporte.
-- [ ] Testar restauração da sessão aria2 e política de bateria no hardware.
+- [x] Testar restauração da sessão aria2 e política de bateria no hardware.
 - [ ] Criar testes de interface para todos os fluxos do controle.
 
 ## Planejamento reservado do KMP Publisher
