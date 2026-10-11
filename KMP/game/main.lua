@@ -14,6 +14,10 @@ local CATALOG_PENDING = os.getenv("KMP_CATALOG_PENDING") or ""
 local CATALOG_DOWNLOADS = os.getenv("KMP_CATALOG_DOWNLOADS") or ""
 local CATALOG_ACTIVE = os.getenv("KMP_CATALOG_ACTIVE") or ""
 local PYTHON = os.getenv("KMP_PYTHON") or "python3"
+local DIAGNOSTIC_TOOL = os.getenv("KMP_DIAGNOSTIC") or ""
+local GAME_DIR = os.getenv("KMP_GAME_DIR") or ""
+local CONF_DIR = os.getenv("KMP_CONF_DIR") or ""
+local DIAGNOSTIC_OUTPUT = os.getenv("KMP_DIAGNOSTIC_OUTPUT") or ""
 
 local sdPaths = { "/roms/ports", "/roms2/ports" }
 local sdLabels = { "SD1 (/roms)", "SD2 (/roms2)" }
@@ -43,6 +47,7 @@ local catalogTrust = {
     configured = false, verified = false, active = false, sequence = 0,
     mirrors = 0, healthyMirrors = 0, fingerprint = "", expiresAt = "", error = ""
 }
+local diagnostic = {active = false, ok = false, message = "", path = ""}
 
 local showRestartPopup = false
 local restartPopupTimer = 0
@@ -400,6 +405,17 @@ function love.load()
 end
 
 function love.update(dt)
+    if diagnostic.active then
+        local event = love.thread.getChannel("diagnostic_done"):pop()
+        if event then
+            diagnostic.active = false
+            diagnostic.ok = event.ok == true
+            diagnostic.path = event.path or ""
+            diagnostic.message = event.ok and
+                ("Diagnostico criado com " .. tostring(event.logs or 0) .. " log(s).") or
+                ("Falha: " .. tostring(event.error or "erro desconhecido")):sub(1, 120)
+        end
+    end
     if showDetails and detailsSeed.loading then
         local actionEvent = love.thread.getChannel("seed_action_done"):pop()
         if actionEvent then
@@ -524,6 +540,36 @@ end
 
 local function shellQuote(value)
     return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function startDiagnostic()
+    diagnostic = {active = true, ok = false, message = "Coletando e protegendo os logs...", path = ""}
+    appState = "diagnostic"
+    while love.thread.getChannel("diagnostic_done"):pop() do end
+    if PYTHON == "" or DIAGNOSTIC_TOOL == "" or GAME_DIR == "" or
+       CONF_DIR == "" or DIAGNOSTIC_OUTPUT == "" then
+        diagnostic.active = false
+        diagnostic.message = "Exportador de diagnostico indisponivel."
+        return
+    end
+    local worker = love.thread.newThread([[
+        local python, tool, gameDir, confDir, outputDir, version = ...
+        local Json = require("json")
+        local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
+        local command = quote(python) .. " " .. quote(tool) ..
+            " --game-dir " .. quote(gameDir) .. " --config-dir " .. quote(confDir) ..
+            " --output-dir " .. quote(outputDir) .. " --app-version " .. quote(version) ..
+            " 2>&1"
+        local process = io.popen(command)
+        local output = process and process:read("*a") or ""
+        if process then process:close() end
+        local result = Json.decode(output)
+        if type(result) ~= "table" then
+            result = {ok = false, error = output ~= "" and output or "processo indisponivel"}
+        end
+        love.thread.getChannel("diagnostic_done"):push(result)
+    ]])
+    worker:start(PYTHON, DIAGNOSTIC_TOOL, GAME_DIR, CONF_DIR, DIAGNOSTIC_OUTPUT, APP_VERSION)
 end
 
 local function startTorrentDownload(game, peerOnly, updateMode)
