@@ -17,6 +17,7 @@ local PYTHON = os.getenv("KMP_PYTHON") or "python3"
 local TEST_MODE = os.getenv("KMP_TEST_MODE") == "1"
 local DIAGNOSTIC_TOOL = os.getenv("KMP_DIAGNOSTIC") or ""
 local SELF_UPDATE_TOOL = os.getenv("KMP_SELF_UPDATE") or ""
+local CLIENT_BASE = os.getenv("KMP_CLIENT_BASE") or ""
 local GAME_DIR = os.getenv("KMP_GAME_DIR") or ""
 local CONF_DIR = os.getenv("KMP_CONF_DIR") or ""
 local DIAGNOSTIC_OUTPUT = os.getenv("KMP_DIAGNOSTIC_OUTPUT") or ""
@@ -102,7 +103,7 @@ local download = {
 local function isWindows() return love.system.getOS() == "Windows" end
 
 local function installedRecord(game)
-    local basePorts = sdPaths[currentSd]
+    local basePorts = game.isClientUpdate and CLIENT_BASE ~= "" and CLIENT_BASE or sdPaths[currentSd]
     if isWindows() then basePorts = "." end
 
     local manifest = basePorts .. "/.kmp/manifests/" .. game.install.portId .. ".json"

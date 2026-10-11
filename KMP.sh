@@ -7,12 +7,24 @@ XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 # KMP/ is atomically replaced.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CLIENT_UPDATER="$SCRIPT_DIR/.kmp/client-updater.py"
-if [ -f "$SCRIPT_DIR/.kmp/client-update/journal.json" ] && [ -f "$CLIENT_UPDATER" ]; then
-  recovery_python=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
-  if [ -z "$recovery_python" ] || ! "$recovery_python" "$CLIENT_UPDATER" recover "$SCRIPT_DIR"; then
+recovery_python=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
+if [ -f "$CLIENT_UPDATER" ] && [ -n "$recovery_python" ]; then
+  if [ -f "$SCRIPT_DIR/.kmp/client-update/journal.json" ] && \
+     ! "$recovery_python" "$CLIENT_UPDATER" recover "$SCRIPT_DIR"; then
     printf 'Falha ao recuperar atualização interrompida do KMP.\n' >&2
     exit 1
   fi
+  if [ -f "$SCRIPT_DIR/.kmp/client-update/pending.json" ]; then
+    printf 'Aplicando atualização pendente do KMP Client...\n'
+    if ! "$recovery_python" "$CLIENT_UPDATER" apply "$SCRIPT_DIR"; then
+      printf 'Falha ao aplicar atualização pendente do KMP.\n' >&2
+      exit 1
+    fi
+  fi
+elif [ -f "$SCRIPT_DIR/.kmp/client-update/journal.json" ] || \
+     [ -f "$SCRIPT_DIR/.kmp/client-update/pending.json" ]; then
+  printf 'Python indisponível para concluir a atualização do KMP.\n' >&2
+  exit 1
 fi
 
 if [ -d "/opt/system/Tools/PortMaster/" ]; then
@@ -51,6 +63,7 @@ export KMP_CATALOG_SYNC="$GAMEDIR/catalog_sync.py"
 export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
 export KMP_DIAGNOSTIC="$GAMEDIR/diagnostic.py"
 export KMP_SELF_UPDATE="$GAMEDIR/self_update.py"
+export KMP_CLIENT_BASE="$SCRIPT_DIR"
 export KMP_GAME_DIR="$GAMEDIR"
 export KMP_CONF_DIR="$CONFDIR"
 export KMP_DIAGNOSTIC_OUTPUT="$GAMEDIR/diagnostics"
