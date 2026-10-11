@@ -127,8 +127,10 @@ luac -p KMP/game/*.lua
 bash -n KMP.sh
 ```
 
-The signed catalogue integration still needs testing on the R36H and a second
-peer. The `demo/` files provide a real test torrent.
+The signed catalogue, peer transfer, aria2 restoration and battery policy have
+been validated on the R36H; results are recorded in
+`docs/HARDWARE-VALIDATION.md`. The `demo/` files provide a reproducible test
+torrent.
 
 The `demo/` folder contains a small public-domain package, its torrent, and a
 matching catalogue. To regenerate it:
