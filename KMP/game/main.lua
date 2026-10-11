@@ -737,6 +737,12 @@ local function startTorrentDownload(game, peerOnly, updateMode)
 end
 
 function love.threaderror(thread, errorMessage)
+    if diagnostic.active then
+        diagnostic.active = false
+        diagnostic.ok = false
+        diagnostic.message = "Falha interna: " .. tostring(errorMessage):sub(1, 100)
+        return
+    end
     syncing = false
     download.active = false
     download.phase = "none"
@@ -933,6 +939,15 @@ end
 function love.keypressed(key)
     if appState == "splash" then return end
 
+    if appState == "diagnostic" then
+        if not diagnostic.active and (key == "a" or key == "b" or key == "return" or
+           key == "space" or key == "escape" or key == "q" or key == "backspace") then
+            appState = "main"
+            showMenu = true
+        end
+        return
+    end
+
     if appState == "catalog_trust" then
         if key == "a" or key == "b" or key == "return" or key == "space" or
            key == "escape" or key == "q" or key == "backspace" then
@@ -1036,10 +1051,10 @@ function love.keypressed(key)
     if showMenu then
         if key == "up" or key == "w" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 5 end
+            if menuSelected < 1 then menuSelected = 6 end
         elseif key == "down" or key == "s" then
             menuSelected = menuSelected + 1
-            if menuSelected > 5 then menuSelected = 1 end
+            if menuSelected > 6 then menuSelected = 1 end
         elseif key == "b" or key == "return" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -1054,6 +1069,9 @@ function love.keypressed(key)
                 loadCatalogTrust()
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
+                showMenu = false
+                startDiagnostic()
+            elseif menuSelected == 6 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -1095,6 +1113,15 @@ end
 
 function love.gamepadpressed(joystick, button)
     if appState == "splash" then return end
+
+    if appState == "diagnostic" then
+        if not diagnostic.active and
+           (button == "a" or button == "b" or button == "back" or button == "start") then
+            appState = "main"
+            showMenu = true
+        end
+        return
+    end
 
     if appState == "catalog_trust" then
         if button == "a" or button == "b" or button == "back" or button == "start" then
@@ -1198,10 +1225,10 @@ function love.gamepadpressed(joystick, button)
     if showMenu then
         if button == "dpup" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 5 end
+            if menuSelected < 1 then menuSelected = 6 end
         elseif button == "dpdown" then
             menuSelected = menuSelected + 1
-            if menuSelected > 5 then menuSelected = 1 end
+            if menuSelected > 6 then menuSelected = 1 end
         elseif button == "a" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -1216,6 +1243,9 @@ function love.gamepadpressed(joystick, button)
                 loadCatalogTrust()
                 appState = "catalog_trust"
             elseif menuSelected == 5 then
+                showMenu = false
+                startDiagnostic()
+            elseif menuSelected == 6 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -1260,7 +1290,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavUp()
             elseif showMenu then
                 menuSelected = menuSelected - 1
-                if menuSelected < 1 then menuSelected = 5 end
+                if menuSelected < 1 then menuSelected = 6 end
             elseif not showMenu and appState == "main" then 
                 handleNavUp() 
             end
@@ -1272,7 +1302,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavDown()
             elseif showMenu then
                 menuSelected = menuSelected + 1
-                if menuSelected > 5 then menuSelected = 1 end
+                if menuSelected > 6 then menuSelected = 1 end
             elseif not showMenu and appState == "main" then 
                 handleNavDown() 
             end
@@ -1676,20 +1706,20 @@ function love.draw()
             love.graphics.rectangle("fill", 0, 0, 640, 480)
 
             love.graphics.setColor(0.1, 0.15, 0.22, 0.98)
-            love.graphics.rectangle("fill", 170, 65, 300, 355, 12, 12)
+            love.graphics.rectangle("fill", 170, 50, 300, 385, 12, 12)
 
             love.graphics.setColor(0.0, 0.82, 1.0, 0.6)
             love.graphics.setLineWidth(2)
-            love.graphics.rectangle("line", 170, 65, 300, 355, 12, 12)
+            love.graphics.rectangle("line", 170, 50, 300, 385, 12, 12)
 
             love.graphics.setColor(0.96, 0.97, 1.0)
             love.graphics.setFont(fontTitle)
-            love.graphics.printf("MENU DE OPCOES", 170, 80, 300, "center")
+            love.graphics.printf("MENU DE OPCOES", 170, 65, 300, "center")
 
             love.graphics.setColor(1, 1, 1, 0.1)
-            love.graphics.line(190, 110, 450, 110)
+            love.graphics.line(190, 95, 450, 95)
 
-            local opt1_y = 130
+            local opt1_y = 112
             if menuSelected == 1 then
                 love.graphics.setColor(0.0, 0.82, 1.0, 0.2)
                 love.graphics.rectangle("fill", 190, opt1_y - 6, 260, 36, 6, 6)
@@ -1700,7 +1730,7 @@ function love.draw()
             love.graphics.setFont(fontItem)
             love.graphics.printf("Mudar Destino: " .. sdLabels[currentSd], 170, opt1_y, 300, "center")
 
-            local opt2_y = 175
+            local opt2_y = 157
             if menuSelected == 2 then
                 love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
                 love.graphics.rectangle("fill", 190, opt2_y - 6, 260, 36, 6, 6)
@@ -1710,7 +1740,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Pesquisar por nome", 170, opt2_y, 300, "center")
 
-            local opt3_y = 220
+            local opt3_y = 202
             if menuSelected == 3 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt3_y - 6, 260, 36, 6, 6)
@@ -1720,7 +1750,7 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Desinstalador de Ports", 170, opt3_y, 300, "center")
 
-            local opt4_y = 265
+            local opt4_y = 247
             if menuSelected == 4 then
                 love.graphics.setColor(0.85, 0.65, 0.2, 0.2)
                 love.graphics.rectangle("fill", 190, opt4_y - 6, 260, 36, 6, 6)
@@ -1730,19 +1760,29 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Confianca do Catalogo", 170, opt4_y, 300, "center")
 
-            local opt5_y = 310
+            local opt5_y = 292
             if menuSelected == 5 then
-                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
+                love.graphics.setColor(0.2, 0.85, 0.45, 0.2)
                 love.graphics.rectangle("fill", 190, opt5_y - 6, 260, 36, 6, 6)
-                love.graphics.setColor(1.0, 0.3, 0.3)
+                love.graphics.setColor(0.2, 0.85, 0.45)
                 love.graphics.rectangle("line", 190, opt5_y - 6, 260, 36, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Sair", 170, opt5_y, 300, "center")
+            love.graphics.printf("Exportar diagnostico", 170, opt5_y, 300, "center")
+
+            local opt6_y = 337
+            if menuSelected == 6 then
+                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
+                love.graphics.rectangle("fill", 190, opt6_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1.0, 0.3, 0.3)
+                love.graphics.rectangle("line", 190, opt6_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(1, 1, 1)
+            else love.graphics.setColor(0.6, 0.65, 0.75) end
+            love.graphics.printf("Sair", 170, opt6_y, 300, "center")
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("A: Confirmar   B: Voltar", 170, 385, 300, "center")
+            love.graphics.printf("A: Confirmar   B: Voltar", 170, 402, 300, "center")
         end
 
         if showSearch then
@@ -1879,6 +1919,34 @@ function love.draw()
             end
             love.graphics.setColor(0.48, 0.58, 0.7)
             love.graphics.printf("A/B: Voltar", 105, 390, 430, "center")
+        end
+
+        if appState == "diagnostic" then
+            love.graphics.setColor(0, 0, 0, 0.9)
+            love.graphics.rectangle("fill", 0, 0, 640, 480)
+            love.graphics.setColor(0.08, 0.12, 0.18, 0.99)
+            love.graphics.rectangle("fill", 70, 95, 500, 290, 12, 12)
+            love.graphics.setColor(diagnostic.active and 0.0 or (diagnostic.ok and 0.2 or 1.0),
+                diagnostic.active and 0.82 or (diagnostic.ok and 0.85 or 0.35),
+                diagnostic.active and 1.0 or (diagnostic.ok and 0.45 or 0.35), 0.8)
+            love.graphics.setLineWidth(2)
+            love.graphics.rectangle("line", 70, 95, 500, 290, 12, 12)
+            love.graphics.setFont(fontTitle)
+            love.graphics.printf("DIAGNOSTICO DE SUPORTE", 90, 120, 460, "center")
+            love.graphics.setFont(fontItem)
+            love.graphics.setColor(0.86, 0.9, 0.96)
+            love.graphics.printf(diagnostic.message, 105, 180, 430, "center")
+            if diagnostic.path ~= "" then
+                love.graphics.setFont(fontSub)
+                love.graphics.setColor(0.55, 0.68, 0.82)
+                love.graphics.printf("Arquivo salvo em:", 105, 230, 430, "center")
+                love.graphics.setColor(0.9, 0.94, 1.0)
+                love.graphics.printf(diagnostic.path, 100, 255, 440, "center")
+            end
+            love.graphics.setFont(fontSub)
+            love.graphics.setColor(0.48, 0.58, 0.7)
+            local diagnosticHint = diagnostic.active and "Aguarde..." or "A/B: Voltar"
+            love.graphics.printf(diagnosticHint, 105, 340, 430, "center")
         end
 
         if appState == "power_menu" then

@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.27
+# KDownloader PM v0.2.28
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -43,7 +43,13 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.27.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.28.zip`; its contents match the layout in `KMP/port.json`.
+
+For support, open the options menu and select **Exportar diagnostico**. The
+client writes a bounded, redacted ZIP to the `KMP-diagnostics` directory beside
+the installed `KMP` directory. RPC secrets, authorization headers, passwords
+and URL tokens are removed; torrent session files and secret files are never
+included.
 
 The portable dependency policy and reproducible download procedure are in
 `docs/PORTABLE-RUNTIME.md`.

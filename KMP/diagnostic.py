@@ -152,7 +152,9 @@ def installed_ports(ports_dir: Path) -> list[dict]:
     manifests = ports_dir / ".kmp/manifests"
     if not manifests.is_dir():
         return result
-    for path in sorted(manifests.glob("*.json")):
+    for path in sorted(manifests.glob("*.json"))[:1000]:
+        if path.is_symlink():
+            continue
         value = read_json(path)
         result.append({key: value.get(key) for key in
                        ("id", "portId", "version", "revision", "variantId", "catalogSequence")})
