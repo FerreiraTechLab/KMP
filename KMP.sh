@@ -39,7 +39,7 @@ export KMP_CATALOG_SECURITY="$GAMEDIR/catalog_security.py"
 export KMP_DIAGNOSTIC="$GAMEDIR/diagnostic.py"
 export KMP_GAME_DIR="$GAMEDIR"
 export KMP_CONF_DIR="$CONFDIR"
-export KMP_DIAGNOSTIC_OUTPUT="${GAMEDIR%/KMP}/KMP-diagnostics"
+export KMP_DIAGNOSTIC_OUTPUT="$GAMEDIR/diagnostics"
 
 runtime_arch=${DEVICE_ARCH:-$(uname -m)}
 [ "$runtime_arch" = "arm64" ] && runtime_arch=aarch64
