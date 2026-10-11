@@ -14,6 +14,7 @@ local CATALOG_PENDING = os.getenv("KMP_CATALOG_PENDING") or ""
 local CATALOG_DOWNLOADS = os.getenv("KMP_CATALOG_DOWNLOADS") or ""
 local CATALOG_ACTIVE = os.getenv("KMP_CATALOG_ACTIVE") or ""
 local PYTHON = os.getenv("KMP_PYTHON") or "python3"
+local TEST_MODE = os.getenv("KMP_TEST_MODE") == "1"
 local DIAGNOSTIC_TOOL = os.getenv("KMP_DIAGNOSTIC") or ""
 local GAME_DIR = os.getenv("KMP_GAME_DIR") or ""
 local CONF_DIR = os.getenv("KMP_CONF_DIR") or ""
@@ -48,6 +49,15 @@ local catalogTrust = {
     mirrors = 0, healthyMirrors = 0, fingerprint = "", expiresAt = "", error = ""
 }
 local diagnostic = {active = false, ok = false, message = "", path = ""}
+local testEvents = {}
+local testInstalledPorts = nil
+
+local function recordTestEvent(action, values)
+    if not TEST_MODE then return end
+    local event = values or {}
+    event.action = action
+    table.insert(testEvents, event)
+end
 
 local showRestartPopup = false
 local restartPopupTimer = 0
@@ -128,6 +138,12 @@ local function applySearch()
 end
 
 local function startSeedStatus(game)
+    if TEST_MODE then
+        detailsSeed = {loading = false, found = game and game.installed == true,
+            seeding = game and game.installed == true, paused = false, gid = "test-gid",
+            uploaded = 0, ratio = 0, uploadSpeed = 0, connections = 0}
+        return
+    end
     if not game or not game.installed then
         detailsSeed = {loading = false, found = false}
         return
@@ -153,6 +169,12 @@ local function startSeedStatus(game)
 end
 
 local function startSeedAction(action, game)
+    if TEST_MODE then
+        recordTestEvent(action, {id = game and game.id})
+        if action == "pause_one" then detailsSeed.paused, detailsSeed.seeding = true, false end
+        if action == "resume_one" then detailsSeed.paused, detailsSeed.seeding = false, true end
+        return
+    end
     if detailsSeed.loading then return end
     local endpoint = os.getenv("KMP_ARIA2_RPC")
     local secret = os.getenv("KMP_ARIA2_SECRET")
@@ -184,6 +206,12 @@ end
 local function scanInstalledPorts()
     installedPorts = {}
     uninstallError = ""
+    if TEST_MODE and testInstalledPorts then
+        for _, port in ipairs(testInstalledPorts) do table.insert(installedPorts, port) end
+        uninstallerSelectedIdx = 1
+        uninstallerScrollY = 0
+        return
+    end
     local function scanDir(basePath, label)
         local seen = {}
         local manifests = io.popen('ls -1 "' .. basePath .. '/.kmp/manifests/"*.json 2>/dev/null')
@@ -545,6 +573,12 @@ end
 local function startDiagnostic()
     diagnostic = {active = true, ok = false, message = "Coletando e protegendo os logs...", path = ""}
     appState = "diagnostic"
+    if TEST_MODE then
+        recordTestEvent("diagnostic")
+        diagnostic = {active = false, ok = true, message = "Diagnostico criado com 2 log(s).",
+            path = "/roms/ports/KMP/diagnostics/test.zip"}
+        return
+    end
     while love.thread.getChannel("diagnostic_done"):pop() do end
     if PYTHON == "" or DIAGNOSTIC_TOOL == "" or GAME_DIR == "" or
        CONF_DIR == "" or DIAGNOSTIC_OUTPUT == "" then
@@ -573,6 +607,16 @@ local function startDiagnostic()
 end
 
 local function startTorrentDownload(game, peerOnly, updateMode)
+    if TEST_MODE then
+        download.active = true
+        download.game = game
+        download.peerOnly = peerOnly == true
+        download.updateMode = updateMode == true
+        download.statusText = "Torrent iniciado; procurando fontes..."
+        recordTestEvent(updateMode and "update" or (peerOnly and "p2p_test" or "install"),
+            {id = game.id})
+        return
+    end
     local endpoint = os.getenv("KMP_ARIA2_RPC")
     local secret = os.getenv("KMP_ARIA2_SECRET")
     local installer = os.getenv("KMP_INSTALLER")
@@ -776,14 +820,17 @@ local function toggleMusic()
 end
 
 local function handleReboot()
+    if TEST_MODE then recordTestEvent("reboot"); return end
     if isWindows() then love.event.quit() else os.execute("sudo reboot") end
 end
 
 local function handleShutdown()
+    if TEST_MODE then recordTestEvent("shutdown"); return end
     if isWindows() then love.event.quit() else os.execute("sudo poweroff") end
 end
 
 local function handleActionExit()
+    if TEST_MODE then recordTestEvent("exit"); return end
     if bgm then bgm:stop() end
     os.exit(0)
 end
@@ -848,6 +895,7 @@ end
 
 local function handleActionReload()
     if download.active or syncing then return end
+    if TEST_MODE then recordTestEvent("reload"); return end
     startSync()
 end
 
@@ -877,6 +925,14 @@ end
 
 local function executeUninstall()
     if gameToUninstall then
+        if TEST_MODE then
+            recordTestEvent("uninstall", {id = gameToUninstall.itemId or gameToUninstall.portId})
+            table.remove(installedPorts, uninstallerSelectedIdx)
+            uninstallerSelectedIdx = math.max(1, math.min(uninstallerSelectedIdx, #installedPorts))
+            showUninstallPopup = false
+            gameToUninstall = nil
+            return
+        end
         if not gameToUninstall.managed then
             uninstallError = "Port legado sem manifesto: remova manualmente."
         else
@@ -934,6 +990,38 @@ local function executeUninstall()
         showUninstallPopup = false
         gameToUninstall = nil
     end
+end
+
+if TEST_MODE then
+    _G.KMP_TEST_API = {
+        reset = function()
+            appState = "main"
+            showMenu, showSearch, showDetails = false, false, false
+            showUninstallPopup, showRestartPopup = false, false
+            menuSelected, powerMenuSelected, selectedIdx = 1, 1, 1
+            searchQuery, searchSelected = "", 1
+            syncing = false
+            download = {active = false, phase = "none", progress = 0, ext_progress = 0,
+                game = nil, statusText = "", statusColor = {0.55, 0.62, 0.72}, speedBps = 0}
+            detailsSeed = {loading = false, found = false}
+            testEvents = {}
+            while love.thread.getChannel("torrent_cancel"):pop() do end
+        end,
+        setCatalog = function(items)
+            catalogAll, catalog = items, items
+            selectedIdx = 1
+        end,
+        setInstalledPorts = function(items) testInstalledPorts = items end,
+        events = function() return testEvents end,
+        snapshot = function()
+            return {appState = appState, showMenu = showMenu, showSearch = showSearch,
+                showDetails = showDetails, showUninstallPopup = showUninstallPopup,
+                menuSelected = menuSelected, selectedIdx = selectedIdx,
+                searchQuery = searchQuery, downloadActive = download.active,
+                downloadStatus = download.statusText, diagnostic = diagnostic,
+                installedPorts = #installedPorts}
+        end,
+    }
 end
 
 function love.keypressed(key)

@@ -92,7 +92,7 @@ das verificações e decisão de revisão rastreáveis.
 - [x] Mostrar versão instalada e versão disponível separadamente.
 - [x] Melhorar logs exportáveis para suporte.
 - [x] Testar restauração da sessão aria2 e política de bateria no hardware.
-- [ ] Criar testes de interface para todos os fluxos do controle.
+- [x] Criar testes de interface para todos os fluxos do controle.
 
 ## Planejamento reservado do KMP Publisher
 

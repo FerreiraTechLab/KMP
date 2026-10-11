@@ -1,0 +1,24 @@
+name: Client tests
+
+on:
+  push:
+    paths: ["KMP/**", "KMP.sh", "tests/**", ".github/workflows/client-tests.yml"]
+  pull_request:
+    paths: ["KMP/**", "KMP.sh", "tests/**", ".github/workflows/client-tests.yml"]
+
+jobs:
+  lua-interface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y lua5.4
+      - run: luac -p KMP/game/*.lua
+      - run: lua tests/catalog.lua
+      - run: lua tests/torrent.lua
+      - run: lua tests/aria2_rpc.lua
+      - run: lua tests/seed_control.lua
+      - run: lua tests/seed_status.lua
+      - run: lua tests/main_smoke.lua
+      - run: lua tests/main_controls.lua
+      - run: KMP_TEST_MODE=1 lua tests/main_flows.lua
+      - run: bash -n KMP.sh KMP/daemon.sh
