@@ -114,9 +114,18 @@ for recovery_root in /roms/ports /roms2/ports; do
 done
 if [ -f "$GAMEDIR/catalog-sources.txt" ] && [ -f "$GAMEDIR/catalog-root.pub" ]; then
   trusted_catalog_key="$CONFDIR/catalog/trusted-key.pem"
-  if [ ! -s "$trusted_catalog_key" ]; then
+  root_generation_file="$CONFDIR/catalog/root-generation"
+  bundled_root_generation=$(cat "$GAMEDIR/catalog-root-generation" 2>/dev/null || printf '1')
+  installed_root_generation=$(cat "$root_generation_file" 2>/dev/null || printf '0')
+  if [ ! -s "$trusted_catalog_key" ] || [ "$installed_root_generation" != "$bundled_root_generation" ]; then
     mkdir -p "$CONFDIR/catalog"
     install -m 600 "$GAMEDIR/catalog-root.pub" "$trusted_catalog_key"
+    if [ -f "$CONFDIR/catalog/state.json" ]; then
+      mv -f "$CONFDIR/catalog/state.json" \
+        "$CONFDIR/catalog/state.pre-root-${installed_root_generation}.json"
+    fi
+    rm -f "$CONFDIR/catalog/pending/head.json" "$CONFDIR/catalog/pending/head.json.sig"
+    printf '%s\n' "$bundled_root_generation" > "$root_generation_file"
   fi
   export KMP_CATALOG_SOURCES="$GAMEDIR/catalog-sources.txt"
   export KMP_CATALOG_PUBLIC_KEY="$trusted_catalog_key"
