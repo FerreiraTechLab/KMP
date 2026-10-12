@@ -131,6 +131,30 @@ class CatalogSyncTest(unittest.TestCase):
         with self.assertRaisesRegex(SYNC.VerificationError, "nome inesperado"):
             SYNC.download_snapshot(head, directory, rpc, sleep=lambda _: None)
 
+    def test_download_reuses_an_already_registered_infohash(self):
+        directory = self.root / "downloads"
+        target = directory / "catalog-00000008.json"
+        target.parent.mkdir(); target.write_text("{}")
+        calls = []
+
+        def rpc(method, params):
+            calls.append(method)
+            if method == "aria2.addTorrent":
+                raise SYNC.VerificationError("InfoHash is already registered")
+            if method == "aria2.tellActive":
+                return [{"gid": "abc123", "infoHash": "b" * 40}]
+            if method == "aria2.tellStatus":
+                return {"status": "active", "seeder": "true", "totalLength": "2",
+                        "infoHash": "b" * 40, "files": [{"path": str(target)}]}
+            self.fail(method)
+
+        head = {"sequence": 8, "catalogMagnet": "magnet:?xt=urn:btih:" + "b" * 40,
+                "catalogTorrent": "base64-torrent"}
+        self.assertEqual(SYNC.download_snapshot(head, directory, rpc,
+                                                sleep=lambda _: None), target)
+        self.assertEqual(calls, ["aria2.addTorrent", "aria2.tellActive",
+                                 "aria2.tellStatus"])
+
     def test_sync_reuses_verified_download_without_rpc(self):
         release = self.release("cached", 8)
         sources = self.root / "sources.txt"

@@ -200,10 +200,29 @@ def download_snapshot(head: dict, directory: Path, rpc, timeout: int = 300,
         "dir": str(directory), "continue": "true", "check-integrity": "true",
         "auto-file-renaming": "false", "seed-ratio": "0",
     }
-    if head.get("catalogTorrent"):
-        gid = rpc("aria2.addTorrent", [head["catalogTorrent"], [], options])
-    else:
-        gid = rpc("aria2.addUri", [[head["catalogMagnet"]], options])
+    try:
+        if head.get("catalogTorrent"):
+            gid = rpc("aria2.addTorrent", [head["catalogTorrent"], [], options])
+        else:
+            gid = rpc("aria2.addUri", [[head["catalogMagnet"]], options])
+    except VerificationError as add_error:
+        gid = None
+        queries = (("aria2.tellActive", []), ("aria2.tellWaiting", [0, 1000]),
+                   ("aria2.tellStopped", [0, 1000]))
+        for method, params in queries:
+            try:
+                entries = rpc(method, params)
+            except VerificationError:
+                continue
+            if not isinstance(entries, list):
+                continue
+            match = next((entry for entry in entries if isinstance(entry, dict) and
+                          str(entry.get("infoHash", "")).lower() == expected_hash), None)
+            if match and isinstance(match.get("gid"), str):
+                gid = match["gid"]
+                break
+        if gid is None:
+            raise add_error
     if not isinstance(gid, str) or not re.fullmatch(r"[0-9a-fA-F]+", gid):
         raise VerificationError("aria2 não iniciou o catálogo")
     deadline = time.monotonic() + timeout
