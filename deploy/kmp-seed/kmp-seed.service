@@ -1,13 +1,22 @@
 [Unit]
-Description=KMP persistent BitTorrent seed node
+Description=KMP public catalogue seed node
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/aria2c --dir=%h/.local/share/kmp-seed/data --check-integrity=true --continue=true --file-allocation=none --enable-dht=true --enable-peer-exchange=true --bt-enable-lpd=true --listen-port=6881 --dht-listen-port=6881 --seed-ratio=0.0 --max-overall-upload-limit=0 --dht-file-path=%h/.local/share/kmp-seed/dht.dat --save-session=%h/.local/share/kmp-seed/session.txt --save-session-interval=30 --log=%h/.local/share/kmp-seed/aria2.log --log-level=notice %h/.local/share/kmp-seed/torrents/catalog-00000004.torrent %h/.local/share/kmp-seed/torrents/catalog-00000005.torrent %h/.local/share/kmp-seed/torrents/catalog-00000006.torrent %h/.local/share/kmp-seed/torrents/celeste64-1.1.1.torrent %h/.local/share/kmp-seed/torrents/kmp-update-test-1.0.torrent %h/.local/share/kmp-seed/torrents/kmp-update-test-2.0.torrent
-Restart=on-failure
+User=kmp-seed
+Group=kmp-seed
+ExecStart=/usr/bin/python3 /usr/local/lib/kmp-seed/kmp_seed_node.py --root /var/lib/kmp-seed --sources /etc/kmp-seed/catalog-sources.txt --public-key /var/lib/kmp-seed/catalog-root.pub --aria2 /usr/local/lib/kmp-seed/kmp-torrentd
+Restart=always
 RestartSec=10
+StateDirectory=kmp-seed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kmp-seed
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

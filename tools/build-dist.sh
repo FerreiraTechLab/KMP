@@ -8,8 +8,17 @@ case "$version" in
 esac
 
 bundled_aria2="$repo_dir/KMP/libs.aarch64/aria2c"
+bundled_torrentd="$repo_dir/KMP/libs.aarch64/kmp-torrentd"
 if [ ! -x "$bundled_aria2" ]; then
     printf 'aria2c portátil ausente. Execute: tools/fetch-runtime-deps.sh aarch64\n' >&2
+    exit 1
+fi
+if [ ! -x "$bundled_torrentd" ]; then
+    printf 'kmp-torrentd portátil ausente. Execute: tools/build-torrentd.sh\n' >&2
+    exit 1
+fi
+if ! file "$bundled_torrentd" | grep -q 'ARM aarch64'; then
+    printf 'kmp-torrentd portátil não é um ELF aarch64 válido\n' >&2
     exit 1
 fi
 if ! file "$bundled_aria2" | grep -q 'ARM aarch64'; then

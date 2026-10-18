@@ -1,4 +1,4 @@
-# KDownloader PM v0.2.34
+# KDownloader PM v0.2.41
 
 PortMaster app for discovering and installing redistributable homebrews through
 BitTorrent. The targets are PortMaster-compatible `aarch64` firmwares,
@@ -22,7 +22,7 @@ and report format are documented in
 
 The package includes the official mirror list and Ed25519 public key. The app
 discovers the newest signed head, downloads its single-file catalogue through
-the persistent aria2 daemon, atomically activates it, and keeps the torrent
+the persistent BitTorrent daemon, atomically activates it, and keeps the torrent
 available for seeding. The signed head embeds the torrent metadata and the
 torrent includes GitHub web seeds, so a first peer can bootstrap without an
 existing console seeder.
@@ -30,7 +30,7 @@ existing console seeder.
 ## Setup on a handheld
 
 1. Put the PortMaster files in the Ports directory: `KMP.sh` and `KMP/`.
-2. Open KMP from the Ports menu. It connects to its bundled `aria2c`
+2. Open KMP from the Ports menu. It connects to its bundled `kmp-torrentd`
    daemon, which restores downloads and seeds from the previous session. The
    default total upload limit is 100 KiB/s. No package manager is required.
 
@@ -43,7 +43,28 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.34.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.48.zip`; its contents match the layout in `KMP/port.json`.
+
+When the BitTorrent daemon starts, the Client attempts to map its TCP and UDP
+listen port through UPnP and then NAT-PMP. The lease is renewed while the
+daemon remains active and removed when it stops. An accepted mapping improves
+console-to-console transfers across networks; CGNAT can still prevent inbound
+connections. The installed-port details and diagnostics report the negotiated
+method and external address scope.
+
+`kmp-torrentd` uses the anacrolix BitTorrent stack with TCP, uTP, DHT over
+IPv4/IPv6, PEX and BEP 55 hole punching. Hole punching lets two peers behind
+compatible NATs ask a mutually connected peer to coordinate a direct uTP
+connection; package bytes still travel directly between peers. Router mapping
+is attempted as an additional path and is not required when hole punching or a
+public IPv6 path succeeds. aria2 remains a launcher fallback during migration.
+
+Any Client can opt in through **Nó comunitário** in the options menu. The
+optional `community_storage_mb=4096` setting controls its storage allowance.
+It adds verified catalogue torrents to the existing daemon and
+stores their packages under `KMP/conf/community/`. The storage limit is filled
+with smaller packages first. Battery seed limits and the global upload limit
+continue to apply.
 
 The signed catalogue can publish a reserved `kmp-client` item. When its version
 is newer, the options menu offers the Client update without listing it as a
@@ -90,7 +111,7 @@ placeholder hash and cannot be downloaded.
 The old static Google Drive/Pixeldrain catalogue is not read by this version.
 The last valid version 1 catalogue is cached for temporary network outages.
 Downloaded packages remain under `/roms/ports/.kmp/torrents/` (or SD2) so that
-aria2 can resume and seed them during the session. Installed ports are tracked
+the daemon can resume and seed them during the session. Installed ports are tracked
 in `.kmp/manifests/`. Ports without a manifest must be removed manually.
 Removing a managed port is
 deliberately complete: installed files, saves, settings, cached packages and
@@ -133,6 +154,7 @@ python3 tests/catalog_security.py
 python3 tests/catalog_sync.py
 python3 tests/self_update.py
 bash tests/daemon.sh
+(cd torrentd && go test ./...)
 luac -p KMP/game/*.lua
 bash -n KMP.sh
 ```

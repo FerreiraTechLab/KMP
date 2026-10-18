@@ -21,6 +21,11 @@ local CLIENT_BASE = os.getenv("KMP_CLIENT_BASE") or ""
 local GAME_DIR = os.getenv("KMP_GAME_DIR") or ""
 local CONF_DIR = os.getenv("KMP_CONF_DIR") or ""
 local DIAGNOSTIC_OUTPUT = os.getenv("KMP_DIAGNOSTIC_OUTPUT") or ""
+local COMMUNITY_CONTROL = os.getenv("KMP_COMMUNITY_CONTROL") or ""
+local COMMUNITY_SETTINGS = os.getenv("KMP_COMMUNITY_SETTINGS") or ""
+local COMMUNITY_DIRECTORY = os.getenv("KMP_COMMUNITY_DIRECTORY") or ""
+local RPC_ENDPOINT = os.getenv("KMP_ARIA2_RPC") or ""
+local RPC_SECRET = os.getenv("KMP_ARIA2_SECRET") or ""
 
 local sdPaths = { "/roms/ports", "/roms2/ports" }
 local sdLabels = { "SD1 (/roms)", "SD2 (/roms2)" }
@@ -51,6 +56,7 @@ local catalogTrust = {
     mirrors = 0, healthyMirrors = 0, fingerprint = "", expiresAt = "", error = ""
 }
 local diagnostic = {active = false, ok = false, message = "", path = ""}
+local communityEnabled = false
 local testEvents = {}
 local testInstalledPorts = nil
 
@@ -59,6 +65,39 @@ local function recordTestEvent(action, values)
     local event = values or {}
     event.action = action
     table.insert(testEvents, event)
+end
+
+local function readCommunitySetting()
+    local handle = io.open(COMMUNITY_SETTINGS, "r")
+    if not handle then return false end
+    for line in handle:lines() do
+        if line:match("^community_node=1%s*$") then handle:close(); return true end
+    end
+    handle:close(); return false
+end
+
+local function toggleCommunity()
+    if TEST_MODE then
+        communityEnabled = not communityEnabled
+        recordTestEvent("community_node", {enabled = communityEnabled})
+        return
+    end
+    if COMMUNITY_CONTROL == "" or COMMUNITY_SETTINGS == "" or CATALOG_ACTIVE == "" or
+       COMMUNITY_DIRECTORY == "" or RPC_ENDPOINT == "" or RPC_SECRET == "" then
+        syncStatus = "Nó comunitário indisponível."
+        return
+    end
+    local action = communityEnabled and "disable" or "enable"
+    local command = string.format("%q %q %q --settings %q --catalog %q --directory %q --rpc %q --secret %q",
+        PYTHON, COMMUNITY_CONTROL, action, COMMUNITY_SETTINGS, CATALOG_ACTIVE,
+        COMMUNITY_DIRECTORY, RPC_ENDPOINT, RPC_SECRET)
+    local ok = os.execute(command)
+    if ok == true or ok == 0 then
+        communityEnabled = not communityEnabled
+        syncStatus = communityEnabled and "Nó comunitário ativado." or "Nó comunitário desativado."
+    else
+        syncStatus = "Falha ao alterar o nó comunitário."
+    end
 end
 
 local showRestartPopup = false
@@ -145,7 +184,8 @@ local function startSeedStatus(game)
     if TEST_MODE then
         detailsSeed = {loading = false, found = game and game.installed == true,
             seeding = game and game.installed == true, paused = false, gid = "test-gid",
-            uploaded = 0, ratio = 0, uploadSpeed = 0, connections = 0}
+            uploaded = 0, ratio = 0, uploadSpeed = 0, connections = 0,
+            portMapping = {active = true, method = "upnp", addressScope = "public"}}
         return
     end
     if not game or not game.installed then
@@ -161,15 +201,25 @@ local function startSeedStatus(game)
     detailsSeed.loading = true
     while love.thread.getChannel("seed_status_done"):pop() do end
     local worker = love.thread.newThread([[
-        local endpoint, secret, infoHash = ...
+        local endpoint, secret, infoHash, mappingPath = ...
+        local Json = require("json")
         local Rpc = require("aria2_rpc")
         local SeedStatus = require("seed_status")
         local ok, result, err = pcall(SeedStatus.find, Rpc.new(endpoint, secret), infoHash)
         if not ok then result, err = nil, tostring(result) end
+        result = result or {error = err or "status indisponivel"}
+        local mappingFile = io.open(mappingPath, "rb")
+        if mappingFile then
+            local raw = mappingFile:read("*a")
+            mappingFile:close()
+            local decodedOk, mapping = pcall(Json.decode, raw)
+            if decodedOk and type(mapping) == "table" then result.portMapping = mapping end
+        end
         love.thread.getChannel("seed_status_done"):push(
-            result or {error = err or "status indisponivel"})
+            result)
     ]])
-    worker:start(endpoint, secret, game.installedInfoHash or game.infoHash)
+    worker:start(endpoint, secret, game.installedInfoHash or game.infoHash,
+        CONF_DIR .. "/daemon/port-mapping.json")
 end
 
 local function startSeedAction(action, game)
@@ -447,6 +497,7 @@ function love.load()
         bgm:play()
     end
 
+    communityEnabled = readCommunitySetting()
     startSync()
 end
 
@@ -1202,10 +1253,10 @@ function love.keypressed(key)
     if showMenu then
         if key == "up" or key == "w" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 7 end
+            if menuSelected < 1 then menuSelected = 8 end
         elseif key == "down" or key == "s" then
             menuSelected = menuSelected + 1
-            if menuSelected > 7 then menuSelected = 1 end
+            if menuSelected > 8 then menuSelected = 1 end
         elseif key == "b" or key == "return" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -1226,6 +1277,8 @@ function love.keypressed(key)
                 showMenu = false
                 startDiagnostic()
             elseif menuSelected == 7 then
+                toggleCommunity()
+            elseif menuSelected == 8 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -1389,10 +1442,10 @@ function love.gamepadpressed(joystick, button)
     if showMenu then
         if button == "dpup" then
             menuSelected = menuSelected - 1
-            if menuSelected < 1 then menuSelected = 7 end
+            if menuSelected < 1 then menuSelected = 8 end
         elseif button == "dpdown" then
             menuSelected = menuSelected + 1
-            if menuSelected > 7 then menuSelected = 1 end
+            if menuSelected > 8 then menuSelected = 1 end
         elseif button == "a" then
             if menuSelected == 1 then handleToggleSD()
             elseif menuSelected == 2 then
@@ -1413,6 +1466,8 @@ function love.gamepadpressed(joystick, button)
                 showMenu = false
                 startDiagnostic()
             elseif menuSelected == 7 then
+                toggleCommunity()
+            elseif menuSelected == 8 then
                 showMenu = false
                 appState = "power_menu"
                 powerMenuSelected = 1
@@ -1458,7 +1513,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavUp()
             elseif showMenu then
                 menuSelected = menuSelected - 1
-                if menuSelected < 1 then menuSelected = 7 end
+                if menuSelected < 1 then menuSelected = 8 end
             elseif not showMenu and appState == "main" then 
                 handleNavUp() 
             end
@@ -1470,7 +1525,7 @@ function love.gamepadaxis(joystick, axis, value)
                 handleUninstallerNavDown()
             elseif showMenu then
                 menuSelected = menuSelected + 1
-                if menuSelected > 7 then menuSelected = 1 end
+                if menuSelected > 8 then menuSelected = 1 end
             elseif not showMenu and appState == "main" then 
                 handleNavDown() 
             end
@@ -1951,19 +2006,29 @@ function love.draw()
             else love.graphics.setColor(0.6, 0.65, 0.75) end
             love.graphics.printf("Exportar diagnostico", 170, opt6_y, 300, "center")
 
-            local opt7_y = 357
+            local opt7_y = 353
             if menuSelected == 7 then
-                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
-                love.graphics.rectangle("fill", 190, opt7_y - 6, 260, 36, 6, 6)
-                love.graphics.setColor(1.0, 0.3, 0.3)
-                love.graphics.rectangle("line", 190, opt7_y - 6, 260, 36, 6, 6)
+                love.graphics.setColor(0.2, 0.85, 0.45, 0.2)
+                love.graphics.rectangle("fill", 190, opt7_y - 6, 260, 32, 6, 6)
+                love.graphics.setColor(0.2, 0.85, 0.45)
+                love.graphics.rectangle("line", 190, opt7_y - 6, 260, 32, 6, 6)
                 love.graphics.setColor(1, 1, 1)
             else love.graphics.setColor(0.6, 0.65, 0.75) end
-            love.graphics.printf("Sair", 170, opt7_y, 300, "center")
+            love.graphics.printf("No comunitario: " .. (communityEnabled and "ativo" or "inativo"), 170, opt7_y, 300, "center")
+
+            local opt8_y = 389
+            if menuSelected == 8 then
+                love.graphics.setColor(1.0, 0.3, 0.3, 0.2)
+                love.graphics.rectangle("fill", 190, opt8_y - 6, 260, 32, 6, 6)
+                love.graphics.setColor(1.0, 0.3, 0.3)
+                love.graphics.rectangle("line", 190, opt8_y - 6, 260, 32, 6, 6)
+                love.graphics.setColor(1, 1, 1)
+            else love.graphics.setColor(0.6, 0.65, 0.75) end
+            love.graphics.printf("Sair", 170, opt8_y, 300, "center")
 
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
-            love.graphics.printf("A: Confirmar   B: Voltar", 170, 410, 300, "center")
+            love.graphics.printf("A: Confirmar   B: Voltar", 170, 421, 300, "center")
         end
 
         if showSearch then
@@ -2046,8 +2111,17 @@ function love.draw()
                     (detailsSeed.paused and "A: retomar este" or "A: pausar este")
                 love.graphics.printf(oneAction .. "   X: pausar todos   Y: retomar todos",
                     75, 355, 490, "center")
-                love.graphics.printf("Atualização automática a cada 2s   |   B: voltar",
-                    90, 382, 460, "center")
+                local mapping = detailsSeed.portMapping or {}
+                local networkText
+                if mapping.active and mapping.addressScope == "cgnat" then
+                    networkText = "Rede: CGNAT; somente conexoes de saida"
+                elseif mapping.active then
+                    networkText = "Rede: " .. tostring(mapping.method or "automatica"):upper() ..
+                        " ativo na porta " .. tostring(mapping.port or 6881)
+                else
+                    networkText = "Rede: sem abertura automatica"
+                end
+                love.graphics.printf(networkText .. "   |   B: voltar", 80, 382, 480, "center")
             else
                 love.graphics.printf("A: instalar/cache   X: teste P2P sem HTTPS   B: voltar",
                     70, 380, 500, "center")

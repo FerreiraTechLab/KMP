@@ -46,6 +46,24 @@ local reusedGid, reusedError, wasReused = reused:start(
     {magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash}, "/tmp/kmp")
 assert(reusedGid == "feed1234" and not reusedError and wasReused)
 
+local replaced = {}
+local moved = Torrent.new(function(method, params)
+    replaced[#replaced + 1] = method
+    if method == "aria2.tellActive" then
+        return {{gid = "0dd1234", status = "complete", infoHash = hash,
+            dir = "/tmp/old-location"}}
+    end
+    if method == "aria2.tellWaiting" or method == "aria2.tellStopped" then return {} end
+    if method == "aria2.forceRemove" or method == "aria2.removeDownloadResult" then return "OK" end
+    if method == "aria2.addUri" then return "new1234" end
+    error("RPC inesperado: " .. method)
+end)
+local movedGid, movedError, movedReused = moved:start(
+    {magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash}, "/tmp/new-location")
+assert(movedGid == "new1234" and not movedError and not movedReused)
+assert(table.concat(replaced, ","):find("aria2.forceRemove,aria2.removeDownloadResult", 1, true),
+    table.concat(replaced, ","))
+
 local resumed = false
 local paused = Torrent.new(function(method, params)
     if method == "aria2.tellActive" then return {} end

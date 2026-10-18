@@ -73,7 +73,8 @@ def run(endpoint: str, secret: str, threshold: int, interval: int, state: Path) 
                     try:
                         rpc.call("aria2.unpause", [gid])
                     except RuntimeError as exc:
-                        if "not found" not in str(exc).lower():
+                        message = str(exc).lower()
+                        if "not found" not in message and "não encontrado" not in message:
                             raise
                     paused.discard(gid)
                     save_paused(state, paused)

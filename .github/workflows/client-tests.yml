@@ -2,9 +2,9 @@ name: Client tests
 
 on:
   push:
-    paths: ["KMP/**", "KMP.sh", "tests/**", ".github/workflows/client-tests.yml"]
+    paths: ["KMP/**", "KMP.sh", "torrentd/**", "deploy/kmp-seed/**", "tools/**", "tests/**", ".github/workflows/client-tests.yml"]
   pull_request:
-    paths: ["KMP/**", "KMP.sh", "tests/**", ".github/workflows/client-tests.yml"]
+    paths: ["KMP/**", "KMP.sh", "torrentd/**", "deploy/kmp-seed/**", "tools/**", "tests/**", ".github/workflows/client-tests.yml"]
 
 jobs:
   lua-interface:
@@ -22,4 +22,20 @@ jobs:
       - run: lua tests/main_controls.lua
       - run: KMP_TEST_MODE=1 lua tests/main_flows.lua
       - run: python3 tests/self_update.py
+      - run: python3 tests/port_mapper.py
+      - run: python3 tests/seed_node.py
       - run: bash -n KMP.sh KMP/daemon.sh
+
+  torrent-engine:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: torrentd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: torrentd/go.mod
+          cache-dependency-path: torrentd/go.sum
+      - run: go test ./...
+      - run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o /tmp/kmp-torrentd ./cmd/kmp-torrentd

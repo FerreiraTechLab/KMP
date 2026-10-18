@@ -119,13 +119,14 @@ def daemon_status(config_dir: Path) -> dict:
     except OSError:
         pass
     settings = {"listen_port": "6881", "upload_limit": "100K",
-                "max_concurrent_downloads": "50", "seed_battery_min": "30"}
+                "max_concurrent_downloads": "50", "seed_battery_min": "30",
+                "community_node": "0", "community_storage_mb": "4096"}
     try:
         for line in (state_dir / "settings.conf").read_text().splitlines():
             if "=" in line:
                 key, value = line.split("=", 1)
                 if key in {"listen_port", "upload_limit", "max_concurrent_downloads",
-                           "seed_battery_min"}:
+                           "seed_battery_min", "community_node", "community_storage_mb"}:
                     settings[key] = value
     except OSError:
         pass
@@ -136,6 +137,8 @@ def daemon_status(config_dir: Path) -> dict:
     except (OSError, ValueError):
         result["batteryPausedCount"] = 0
     result["torrents"] = torrent_summary(state_dir)
+    mapping = read_json(state_dir / "port-mapping.json")
+    result["portMapping"] = mapping if mapping else {"active": False}
     return result
 
 
@@ -193,6 +196,7 @@ def torrent_summary(state_dir: Path) -> dict:
     endpoint, secret = credentials
     keys = ["status", "totalLength", "completedLength"]
     try:
+        version = rpc_call(endpoint, secret, "aria2.getVersion", [])
         groups = [
             rpc_call(endpoint, secret, "aria2.tellActive", [keys]),
             rpc_call(endpoint, secret, "aria2.tellWaiting", [0, 1000, keys]),
@@ -200,7 +204,18 @@ def torrent_summary(state_dir: Path) -> dict:
         ]
         if not all(isinstance(items, list) for items in groups):
             raise ValueError("lista RPC inválida")
-        return {"available": True, **summarize_torrents(groups)}
+        backend = version.get("version") if isinstance(version, dict) else None
+        features = version.get("enabledFeatures", []) if isinstance(version, dict) else []
+        result = {"available": True, "backend": backend, "features": features,
+                  **summarize_torrents(groups)}
+        if isinstance(backend, str) and backend.startswith("kmp-torrentd "):
+            try:
+                network = rpc_call(endpoint, secret, "kmp.getNetworkStats", [])
+                if isinstance(network, dict):
+                    result["network"] = network
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                result["networkError"] = type(exc).__name__
+        return result
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         return {"available": False, "error": type(exc).__name__}
 

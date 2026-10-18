@@ -9,10 +9,107 @@ import binascii
 import json
 from pathlib import Path
 import re
+import hashlib
+from urllib.parse import urlparse
 
 
 class ContractError(ValueError):
     pass
+
+
+def bdecode(payload: bytes):
+    """Decode the strict bencode subset used by v1 torrent metadata."""
+    offset = 0
+
+    def take():
+        nonlocal offset
+        if offset >= len(payload):
+            fail("torrent truncado")
+        marker = payload[offset]
+        if marker == ord("i"):
+            end = payload.find(b"e", offset + 1)
+            if end < 0:
+                fail("inteiro bencode truncado")
+            raw = payload[offset + 1:end]
+            if not re.fullmatch(rb"-?(0|[1-9][0-9]*)", raw):
+                fail("inteiro bencode inválido")
+            offset = end + 1
+            return int(raw)
+        if marker == ord("l"):
+            offset += 1
+            result = []
+            while offset < len(payload) and payload[offset] != ord("e"):
+                result.append(take())
+            if offset >= len(payload):
+                fail("lista bencode truncada")
+            offset += 1
+            return result
+        if marker == ord("d"):
+            offset += 1
+            result, previous = {}, None
+            while offset < len(payload) and payload[offset] != ord("e"):
+                key = take()
+                if not isinstance(key, bytes) or (previous is not None and key <= previous):
+                    fail("dicionário bencode inválido")
+                previous, result[key] = key, take()
+            if offset >= len(payload):
+                fail("dicionário bencode truncado")
+            offset += 1
+            return result
+        colon = payload.find(b":", offset)
+        if colon < 0 or not payload[offset:colon].isdigit():
+            fail("string bencode inválida")
+        size = int(payload[offset:colon])
+        if payload[offset:colon].startswith(b"0") and size:
+            fail("tamanho bencode inválido")
+        offset = colon + 1
+        end = offset + size
+        if end > len(payload):
+            fail("string bencode truncada")
+        value, offset = payload[offset:end], end
+        return value
+
+    value = take()
+    if offset != len(payload):
+        fail("dados após o torrent")
+    return value
+
+
+def bencode(value):
+    if isinstance(value, int):
+        return b"i" + str(value).encode() + b"e"
+    if isinstance(value, bytes):
+        return str(len(value)).encode() + b":" + value
+    if isinstance(value, list):
+        return b"l" + b"".join(bencode(item) for item in value) + b"e"
+    if isinstance(value, dict):
+        return b"d" + b"".join(bencode(key) + bencode(value[key]) for key in sorted(value)) + b"e"
+    fail("tipo bencode inválido")
+
+
+def check_torrent(payload: bytes, download: dict, context: str) -> None:
+    document = bdecode(payload)
+    if not isinstance(document, dict) or not isinstance(document.get(b"info"), dict):
+        fail(f"{context}: metainfo BitTorrent inválido")
+    info = document[b"info"]
+    if b"files" in info or info.get(b"name", b"").decode("utf-8", "replace") != download["packageFile"]:
+        fail(f"{context}: torrent não contém somente o ZIP esperado")
+    if info.get(b"length") != download["sizeBytes"]:
+        fail(f"{context}: tamanho do torrent diverge do pacote")
+    if info.get(b"private", 0) not in (0,):
+        fail(f"{context}: torrent privado impede a rede DHT")
+    if hashlib.sha1(bencode(info)).hexdigest() != download["infoHash"]:
+        fail(f"{context}: infoHash não corresponde ao torrent")
+    trackers = []
+    for tier in document.get(b"announce-list", []):
+        if isinstance(tier, list):
+            trackers.extend(value.decode("utf-8", "replace") for value in tier if isinstance(value, bytes))
+    announce = document.get(b"announce")
+    if isinstance(announce, bytes):
+        trackers.append(announce.decode("utf-8", "replace"))
+    trackers = set(trackers)
+    if len(trackers) < 2 or any(urlparse(value).scheme not in ("http", "https", "udp") for value in trackers):
+        fail(f"{context}: torrent precisa de ao menos dois trackers públicos válidos")
 
 
 def fail(message: str) -> None:
@@ -97,6 +194,7 @@ def validate_catalog(document: dict) -> None:
                 raise ContractError(f"{context}: torrent não é base64 válido") from exc
             if not 1 <= len(torrent) <= 64 * 1024:
                 fail(f"{context}: tamanho do torrent inválido")
+            check_torrent(torrent, download, context)
 
 
 def main() -> int:

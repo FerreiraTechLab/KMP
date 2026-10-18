@@ -20,3 +20,11 @@ Para cada execução, anote também o tempo mostrado entre iniciar o download e 
 primeira alteração de `completedBytes`. Compare mediana de velocidade, memória
 máxima, diferença de `cpuTicks`, queda de bateria e número de peers. Preserve o
 JSONL original junto da versão do KMP e do firmware testados.
+
+## Resultado confirmado em hardware
+
+Em 18 de outubro de 2026, o KMP Client concluiu e instalou um port recebido por
+BitTorrent com o Publisher em outro roteador do mesmo prédio. O Client mostrou
+duas conexões de peer durante a transferência. O teste validou descoberta,
+transferência, verificação e instalação entre duas redes distintas usando o
+modo de nó comunitário.

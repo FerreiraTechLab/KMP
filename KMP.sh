@@ -146,13 +146,19 @@ if [ -f "$GAMEDIR/peer.txt" ]; then
   export KMP_PEER
 fi
 
-# Prefer a PortMaster-local BitTorrent client; fall back to the firmware package.
-# The application reports a missing backend when neither is available.
+# Prefer the KMP engine with BEP 55 hole punching. Keep aria2 as a migration
+# fallback for packages that do not contain kmp-torrentd yet.
+bundled_torrentd="$GAMEDIR/libs.${runtime_arch}/kmp-torrentd"
 bundled_aria2="$GAMEDIR/libs.${runtime_arch}/aria2c"
+if [ -f "$bundled_torrentd" ]; then
+  chmod +x "$bundled_torrentd" 2>/dev/null || true
+fi
 if [ -f "$bundled_aria2" ]; then
   chmod +x "$bundled_aria2" 2>/dev/null || true
 fi
-if [ -x "$bundled_aria2" ]; then
+if [ -x "$bundled_torrentd" ]; then
+  export KMP_ARIA2="$bundled_torrentd"
+elif [ -x "$bundled_aria2" ]; then
   export KMP_ARIA2="$bundled_aria2"
 elif command -v aria2c >/dev/null 2>&1; then
   export KMP_ARIA2="$(command -v aria2c)"
@@ -184,6 +190,23 @@ if [ -n "$KMP_ARIA2" ]; then
     export KMP_ARIA2_SECRET=""
   fi
 fi
+
+# An opted-in console mirrors approved packages with the daemon it already
+# uses. Data stays under KMP/conf and therefore never appears as another port.
+community_enabled=$(sed -n 's/^community_node=//p' "$CONFDIR/daemon/settings.conf" 2>/dev/null | tail -n 1)
+community_limit=$(sed -n 's/^community_storage_mb=//p' "$CONFDIR/daemon/settings.conf" 2>/dev/null | tail -n 1)
+case "$community_limit" in ''|*[!0-9]*) community_limit=4096 ;; esac
+if [ "$community_enabled" = "1" ] && [ -n "$KMP_PYTHON" ] &&
+   [ -s "$CONFDIR/catalog/active.json" ] && [ -n "${KMP_ARIA2_RPC:-}" ]; then
+  "$KMP_PYTHON" "$GAMEDIR/community_node.py" \
+    --catalog "$CONFDIR/catalog/active.json" \
+    --directory "$CONFDIR/community/packages" \
+    --rpc "$KMP_ARIA2_RPC" --secret "$KMP_ARIA2_SECRET" \
+    --limit-mb "$community_limit" >> "$CONFDIR/daemon/community.log" 2>&1 || true
+fi
+export KMP_COMMUNITY_CONTROL="$GAMEDIR/community_control.py"
+export KMP_COMMUNITY_SETTINGS="$CONFDIR/daemon/settings.conf"
+export KMP_COMMUNITY_DIRECTORY="$CONFDIR/community/packages"
 
 # Run the love runtime
 $GPTOKEYB "$LOVE_GPTK" &

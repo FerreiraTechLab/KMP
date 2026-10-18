@@ -64,6 +64,49 @@ class DiagnosticTest(unittest.TestCase):
         self.assertEqual(summary["paused"], 1)
         self.assertEqual(summary["errors"], 1)
 
+    def test_torrent_summary_reports_backend_capabilities(self):
+        calls = []
+        original_credentials = MODULE.rpc_credentials
+        original_call = MODULE.rpc_call
+        MODULE.rpc_credentials = lambda _state: ("http://127.0.0.1:1/jsonrpc", "secret")
+        def fake_call(_endpoint, _secret, method, _parameters):
+            calls.append(method)
+            if method == "aria2.getVersion":
+                return {"version": "kmp-torrentd 0.1.0", "enabledFeatures": ["BEP55"]}
+            if method == "kmp.getNetworkStats":
+                return {"successfulAfterHolepunchConnect": 2}
+            return []
+        MODULE.rpc_call = fake_call
+        try:
+            value = MODULE.torrent_summary(Path("/unused"))
+        finally:
+            MODULE.rpc_credentials = original_credentials
+            MODULE.rpc_call = original_call
+        self.assertEqual(value["backend"], "kmp-torrentd 0.1.0")
+        self.assertEqual(value["features"], ["BEP55"])
+        self.assertEqual(value["network"]["successfulAfterHolepunchConnect"], 2)
+        self.assertIn("aria2.getVersion", calls)
+
+    def test_old_torrentd_keeps_base_summary_when_network_rpc_is_missing(self):
+        original_credentials = MODULE.rpc_credentials
+        original_call = MODULE.rpc_call
+        MODULE.rpc_credentials = lambda _state: ("http://127.0.0.1:1/jsonrpc", "secret")
+        def fake_call(_endpoint, _secret, method, _parameters):
+            if method == "aria2.getVersion":
+                return {"version": "kmp-torrentd 0.1.0", "enabledFeatures": ["BEP55"]}
+            if method == "kmp.getNetworkStats":
+                raise ValueError("método não implementado")
+            return []
+        MODULE.rpc_call = fake_call
+        try:
+            value = MODULE.torrent_summary(Path("/unused"))
+        finally:
+            MODULE.rpc_credentials = original_credentials
+            MODULE.rpc_call = original_call
+        self.assertTrue(value["available"])
+        self.assertEqual(value["backend"], "kmp-torrentd 0.1.0")
+        self.assertEqual(value["networkError"], "ValueError")
+
     def test_log_tail_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "large.log"

@@ -68,7 +68,8 @@ local profile = {
 local v3items, v3error, v3metadata = Catalog.validate(v3document, profile)
 assert(v3items and not v3error and #v3items == 1)
 assert(v3items[1].variantId == "aarch64-portmaster")
-assert(v3items[1].revision == 1 and v3items[1].packageSha256 == string.rep("a", 64))
+assert(v3items[1].revision == 1 and
+    v3items[1].packageSha256 == "8c0a31939409f76cf40a06f8542e9843e833e9efaf26f607821025208d13c91a")
 assert(v3metadata.schemaVersion == 3 and v3metadata.incompatible == 0)
 
 local client = item()

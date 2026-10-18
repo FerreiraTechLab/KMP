@@ -21,6 +21,13 @@ fontes de confiança. A rede precisa de pelo menos um seeder alcançável para
 cada torrent. Consoles ajudam a capacidade da rede, mas não substituem o seeder
 inicial enquanto todos estiverem desligados ou atrás de NAT restritivo.
 
+O Client e o Publisher tentam manter a porta BitTorrent mapeada por UPnP ou
+NAT-PMP, em TCP e UDP. O mapeamento é uma otimização automática: um peer
+alcançável permite que peers atrás de NAT iniciem a conexão com ele. Redes com
+CGNAT ou gateways que recusam o protocolo continuam operando somente como
+clientes de saída e precisam encontrar outro peer alcançável ou usar o mirror
+HTTPS.
+
 ## Publicação do catálogo
 
 Cada publicação cria dois artefatos imutáveis:
@@ -124,20 +131,20 @@ manualmente uma única vez.
 
 ## Daemon BitTorrent
 
-O cliente distribui `aria2c` estático dentro de `libs.aarch64/`. Isso permite
-usar BitTorrent em firmwares imutáveis como Rocknix sem `apt` ou alterações na
-partição do sistema. O launcher prefere esse executável e mantém o aria2 do
-sistema apenas como fallback. Dependências centrais de vídeo, SDL e libc do
-firmware não são substituídas.
+O cliente distribui `kmp-torrentd` estático dentro de `libs.aarch64/`. Isso
+permite usar BitTorrent em firmwares imutáveis como Rocknix sem `apt` ou
+alterações na partição do sistema. O daemon usa TCP, uTP, DHT IPv4/IPv6, PEX e
+BEP 55. O launcher mantém aria2 como fallback durante a migração. Dependências
+centrais de vídeo, SDL e libc do firmware não são substituídas.
 
-O aria2 deixa de pertencer ao processo da interface:
+O daemon deixa de pertencer ao processo da interface:
 
 ```text
 Inicialização do KMP
         │
         ├── encontra daemon existente e conecta por RPC
         └── ou inicia daemon persistente
-                 ├── restaura session.txt
+                 ├── restaura torrentd/session.json
                  ├── baixa pacotes e snapshots
                  ├── semeia downloads concluídos
                  └── salva a sessão periodicamente
@@ -149,15 +156,17 @@ Estado proposto em `/roms/ports/KMP/conf/daemon/`:
 | --- | --- |
 | `pid` | PID do processo validado antes do uso |
 | `rpc.env` | endpoint e segredo RPC, modo `0600` |
-| `session.txt` | torrents retomados pelo aria2 |
+| `torrentd/session.json` | torrents restaurados pelo kmp-torrentd |
+| `session.txt` | sessão mantida para fallback com aria2 |
 | `aria2.log` | log rotacionado do daemon |
 | `settings.conf` | limites escolhidos pelo usuário |
 
 Configuração inicial:
 
 - RPC somente em `127.0.0.1` com segredo aleatório persistente.
-- DHT IPv4, PEX e LPD habilitados.
-- Porta BitTorrent fixa configurável para permitir encaminhamento no roteador.
+- DHT IPv4/IPv6, PEX, TCP, uTP e BEP 55 habilitados.
+- Porta BitTorrent fixa configurável, UPnP/NAT-PMP automático e hole punching
+  quando houver um peer comum capaz de coordenar uma conexão direta.
 - Upload padrão de 100 KiB/s.
 - Sessão salva a cada 30 segundos e após inclusão de um torrent.
 - Pacotes concluídos continuam semeando enquanto o aparelho estiver ligado.
@@ -179,6 +188,6 @@ como teste de integração e não participa da rede de produção.
 1. Gerador e verificador de snapshots e heads assinados.
 2. Validador do esquema de catálogo 2 e proteção contra downgrade.
 3. Sincronizador com múltiplos endpoints e cache atômico.
-4. Gerenciador do daemon aria2 e sessão persistente.
+4. Gerenciador do daemon BitTorrent e sessão persistente.
 5. Tela de seeds com estado, upload, proporção e ações de pausa/retomada.
 6. Teste entre redes diferentes usando um seeder inicial alcançável.

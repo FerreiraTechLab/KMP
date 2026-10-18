@@ -26,6 +26,7 @@ kill -0 "$first_monitor_pid"
 grep '^KMP_ARIA2_RPC=http://127.0.0.1:26801/jsonrpc$' "$test_dir/first.env" >/dev/null
 grep -E '^KMP_ARIA2_SECRET=[0-9a-f]{32}$' "$test_dir/first.env" >/dev/null
 [ "$(stat -c %a "$test_dir/state/rpc.secret")" = 600 ]
+grep -E "^$test_dir/fake-aria2c:[0-9a-f]{64}$" "$test_dir/state/daemon.backend" >/dev/null
 grep '^--max-concurrent-downloads=50$' "$test_dir/aria2.args" >/dev/null
 
 "$repo_dir/KMP/daemon.sh" start "$test_dir/fake-aria2c" \
@@ -33,11 +34,20 @@ grep '^--max-concurrent-downloads=50$' "$test_dir/aria2.args" >/dev/null
 [ "$first_pid" = "$(cat "$test_dir/state/pid")" ]
 [ "$first_monitor_pid" = "$(cat "$test_dir/state/battery-monitor.pid")" ]
 cmp "$test_dir/first.env" "$test_dir/second.env"
+
+# A client update that changes the selected backend must replace the running
+# daemon even when its protocol version is unchanged.
+cp "$test_dir/fake-aria2c" "$test_dir/fake-aria2c-new"
+"$repo_dir/KMP/daemon.sh" start "$test_dir/fake-aria2c-new" \
+  "$test_dir/state" "$test_dir/downloads" > "$test_dir/third.env"
+second_pid=$(cat "$test_dir/state/pid")
+[ "$first_pid" != "$second_pid" ]
+grep -E "^$test_dir/fake-aria2c-new:[0-9a-f]{64}$" "$test_dir/state/daemon.backend" >/dev/null
 "$repo_dir/KMP/daemon.sh" status "$test_dir/fake-aria2c" \
   "$test_dir/state" "$test_dir/downloads" | grep '^running pid=' >/dev/null
 
 "$repo_dir/KMP/daemon.sh" stop "$test_dir/fake-aria2c" \
   "$test_dir/state" "$test_dir/downloads"
-! kill -0 "$first_pid" 2>/dev/null
+! kill -0 "$second_pid" 2>/dev/null
 [ ! -e "$test_dir/state/rpc.env" ]
 printf 'daemon tests: ok\n'

@@ -17,11 +17,11 @@ function Torrent.new(rpc, settings)
     return setmetatable({rpc = rpc, settings = settings}, Torrent)
 end
 
-function Torrent:find(expectedHash)
+function Torrent:find(expectedHash, expectedDirectory)
     if type(expectedHash) ~= "string" or not expectedHash:match("^[0-9a-fA-F]+$") then
         return nil
     end
-    local keys = {"gid", "status", "infoHash"}
+    local keys = {"gid", "status", "infoHash", "dir"}
     local groups = {
         {"aria2.tellActive", {keys}},
         {"aria2.tellWaiting", {0, 1000, keys}},
@@ -34,7 +34,16 @@ function Torrent:find(expectedHash)
                 if type(item.infoHash) == "string" and
                    item.infoHash:lower() == expectedHash:lower() and
                    type(item.gid) == "string" and item.gid:match("^[0-9a-fA-F]+$") then
-                    if item.status == "paused" then
+                    if type(expectedDirectory) == "string" and expectedDirectory ~= "" and
+                       type(item.dir) == "string" and item.dir ~= "" and
+                       item.dir ~= expectedDirectory then
+                        local removed, removeError = self.rpc("aria2.forceRemove", {item.gid})
+                        if removed == nil then
+                            return nil, removeError or "falha ao substituir torrent em diretório antigo"
+                        end
+                        self.rpc("aria2.removeDownloadResult", {item.gid})
+                        return nil
+                    elseif item.status == "paused" then
                         local resumed, err = self.rpc("aria2.unpause", {item.gid})
                         if resumed == nil then return nil, err or "não foi possível retomar o torrent" end
                     elseif item.status == "error" or item.status == "removed" then
@@ -84,7 +93,7 @@ function Torrent:start(item, directory)
        type(directory) ~= "string" or directory == "" then
         return nil, "pacote ou destino inválido"
     end
-    local existing, findError, reused = self:find(item.infoHash)
+    local existing, findError, reused = self:find(item.infoHash, directory)
     if findError then return nil, findError end
     if existing then return existing, nil, reused end
     local magnet = item.magnet
