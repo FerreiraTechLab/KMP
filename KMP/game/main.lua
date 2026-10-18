@@ -56,7 +56,7 @@ local catalogTrust = {
     mirrors = 0, healthyMirrors = 0, fingerprint = "", expiresAt = "", error = ""
 }
 local diagnostic = {active = false, ok = false, message = "", path = ""}
-local communityEnabled = false
+local communityEnabled = true
 local testEvents = {}
 local testInstalledPorts = nil
 
@@ -69,11 +69,12 @@ end
 
 local function readCommunitySetting()
     local handle = io.open(COMMUNITY_SETTINGS, "r")
-    if not handle then return false end
+    if not handle then return true end
     for line in handle:lines() do
+        if line:match("^community_node=0%s*$") then handle:close(); return false end
         if line:match("^community_node=1%s*$") then handle:close(); return true end
     end
-    handle:close(); return false
+    handle:close(); return true
 end
 
 local function toggleCommunity()

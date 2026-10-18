@@ -43,7 +43,7 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.48.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.50.zip`; its contents match the layout in `KMP/port.json`.
 
 When the BitTorrent daemon starts, the Client attempts to map its TCP and UDP
 listen port through UPnP and then NAT-PMP. The lease is renewed while the
@@ -59,12 +59,16 @@ connection; package bytes still travel directly between peers. Router mapping
 is attempted as an additional path and is not required when hole punching or a
 public IPv6 path succeeds. aria2 remains a launcher fallback during migration.
 
-Any Client can opt in through **Nó comunitário** in the options menu. The
+Every new Client starts with **Nó comunitário** enabled and can disable or
+enable it at any time in the options menu. The
 optional `community_storage_mb=4096` setting controls its storage allowance.
 It adds verified catalogue torrents to the existing daemon and
 stores their packages under `KMP/conf/community/`. The storage limit is filled
 with smaller packages first. Battery seed limits and the global upload limit
 continue to apply.
+On handhelds, aggregate BitTorrent downloads default to 1 MiB/s and each
+torrent uses a bounded connection pool so community mirroring cannot starve
+catalogue access or the rest of the system network.
 
 The signed catalogue can publish a reserved `kmp-client` item. When its version
 is newer, the options menu offers the Client update without listing it as a

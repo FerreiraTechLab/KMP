@@ -24,7 +24,7 @@ python_binary=${KMP_PYTHON:-}
 if [ -z "$python_binary" ]; then
   python_binary=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
 fi
-daemon_version=10
+daemon_version=11
 
 backend_identity() {
   resolved=$aria2_binary
@@ -161,9 +161,10 @@ case "$command_name" in
     fi
     listen_port=$(read_setting listen_port 6881)
     upload_limit=$(read_setting upload_limit 100K)
+    download_limit=$(read_setting download_limit 1M)
     max_concurrent_downloads=$(read_setting max_concurrent_downloads 50)
     case "$rpc_port:$listen_port" in *[!0-9:]*) printf 'porta inválida\n' >&2; exit 1 ;; esac
-    case "$upload_limit" in *[!0-9KMGkmg]*) printf 'limite de upload inválido\n' >&2; exit 1 ;; esac
+    case "$upload_limit:$download_limit" in *[!0-9KMGkmg:]*) printf 'limite de transferência inválido\n' >&2; exit 1 ;; esac
     case "$max_concurrent_downloads" in
       ''|*[!0-9]*|0) printf 'limite de downloads simultâneos inválido\n' >&2; exit 1 ;;
     esac
@@ -176,6 +177,7 @@ case "$command_name" in
         --rpc-listen="127.0.0.1:${rpc_port}" --rpc-secret="$rpc_secret" \
         --state-dir="$state_dir/torrentd" --data-dir="$download_dir" \
         --listen-port="$listen_port" --upload-limit="$upload_limit" \
+        --download-limit="$download_limit" \
         < /dev/null >> "$log_file" 2>&1 &
     else
       setsid "$aria2_binary" \

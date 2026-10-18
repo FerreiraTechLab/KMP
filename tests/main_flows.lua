@@ -164,7 +164,7 @@ assert(event("apply_client_update") and quitCalled)
 -- O nó comunitário pode ser ativado pela interface sem editar arquivos.
 api.reset()
 openMenuItem(7)
-assert(event("community_node") and event("community_node").enabled)
+assert(event("community_node") and not event("community_node").enabled)
 
 -- Atualizar, sair, reiniciar e desligar geram as ações corretas sem executá-las.
 api.reset()

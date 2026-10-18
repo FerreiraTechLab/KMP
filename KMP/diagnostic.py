@@ -118,14 +118,14 @@ def daemon_status(config_dir: Path) -> dict:
             result["running"] = Path("/proc", pid_text).exists()
     except OSError:
         pass
-    settings = {"listen_port": "6881", "upload_limit": "100K",
+    settings = {"listen_port": "6881", "upload_limit": "100K", "download_limit": "1M",
                 "max_concurrent_downloads": "50", "seed_battery_min": "30",
-                "community_node": "0", "community_storage_mb": "4096"}
+                "community_node": "1", "community_storage_mb": "4096"}
     try:
         for line in (state_dir / "settings.conf").read_text().splitlines():
             if "=" in line:
                 key, value = line.split("=", 1)
-                if key in {"listen_port", "upload_limit", "max_concurrent_downloads",
+                if key in {"listen_port", "upload_limit", "download_limit", "max_concurrent_downloads",
                            "seed_battery_min", "community_node", "community_storage_mb"}:
                     settings[key] = value
     except OSError:

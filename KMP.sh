@@ -194,6 +194,7 @@ fi
 # An opted-in console mirrors approved packages with the daemon it already
 # uses. Data stays under KMP/conf and therefore never appears as another port.
 community_enabled=$(sed -n 's/^community_node=//p' "$CONFDIR/daemon/settings.conf" 2>/dev/null | tail -n 1)
+case "$community_enabled" in 0) ;; *) community_enabled=1 ;; esac
 community_limit=$(sed -n 's/^community_storage_mb=//p' "$CONFDIR/daemon/settings.conf" 2>/dev/null | tail -n 1)
 case "$community_limit" in ''|*[!0-9]*) community_limit=4096 ;; esac
 if [ "$community_enabled" = "1" ] && [ -n "$KMP_PYTHON" ] &&

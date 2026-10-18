@@ -28,7 +28,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const version = "0.2.0"
+const version = "0.2.1"
 
 type rpcRequest struct {
 	JSONRPC string            `json:"jsonrpc"`
@@ -85,7 +85,7 @@ type daemon struct {
 }
 
 func main() {
-	var rpcAddr, secret, stateDir, dataDir, uploadLimit string
+	var rpcAddr, secret, stateDir, dataDir, uploadLimit, downloadLimit string
 	var listenPort int
 	flag.StringVar(&rpcAddr, "rpc-listen", "127.0.0.1:26801", "endereço local da API JSON-RPC")
 	flag.StringVar(&secret, "rpc-secret", "", "segredo da API JSON-RPC")
@@ -93,6 +93,7 @@ func main() {
 	flag.StringVar(&dataDir, "data-dir", "./downloads", "diretório padrão dos downloads")
 	flag.IntVar(&listenPort, "listen-port", 6881, "porta TCP/UDP do BitTorrent")
 	flag.StringVar(&uploadLimit, "upload-limit", "100K", "limite global de upload")
+	flag.StringVar(&downloadLimit, "download-limit", "0", "limite global de download")
 	flag.Parse()
 	if secret == "" {
 		log.Fatal("--rpc-secret é obrigatório")
@@ -116,10 +117,17 @@ func main() {
 	cfg.NoDHT = false
 	cfg.NoDefaultPortForwarding = false
 	cfg.PeriodicallyAnnounceTorrentsToDht = true
+	// Handheld kernels and Wi-Fi drivers degrade sharply with dozens of parallel
+	// dials. Keep discovery enabled while bounding active connection pressure.
+	cfg.EstablishedConnsPerTorrent = 12
+	cfg.HalfOpenConnsPerTorrent = 4
 	cfg.ExtendedHandshakeClientVersion = "KMP torrentd/" + version
 	cfg.DefaultStorage = storage.NewFileOpts(storage.NewFileClientOpts{ClientBaseDir: dataDir})
 	if n, err := parseRate(uploadLimit); err == nil && n > 0 {
 		cfg.UploadRateLimiter = rate.NewLimiter(rate.Limit(n), max(int(n), 32*1024))
+	}
+	if n, err := parseRate(downloadLimit); err == nil && n > 0 {
+		cfg.DownloadRateLimiter = rate.NewLimiter(rate.Limit(n), max(int(n), 1024*1024))
 	}
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
