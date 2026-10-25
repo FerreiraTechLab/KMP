@@ -28,7 +28,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-const version = "0.2.1"
+const version = "0.2.2"
 
 type rpcRequest struct {
 	JSONRPC string            `json:"jsonrpc"`
@@ -388,6 +388,7 @@ func (d *daemon) statusOf(x *transfer) map[string]any {
 		"gid": x.GID, "status": status, "totalLength": strconv.FormatInt(total, 10),
 		"dir":             x.Dir,
 		"completedLength": strconv.FormatInt(done, 10), "downloadSpeed": strconv.FormatInt(downRate, 10),
+		"downloadLength": strconv.FormatInt(st.BytesReadUsefulData.Int64(), 10),
 		"uploadSpeed": strconv.FormatInt(upRate, 10), "uploadLength": strconv.FormatInt(st.BytesWrittenData.Int64(), 10),
 		"infoHash": strings.ToLower(t.InfoHash().HexString()), "seeder": strconv.FormatBool(total > 0 && done >= total),
 		"numSeeders": strconv.Itoa(st.ConnectedSeeders), "connections": strconv.Itoa(st.ActivePeers), "files": files,
