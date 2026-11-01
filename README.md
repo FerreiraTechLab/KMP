@@ -43,7 +43,7 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.50.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.51.zip`; its contents match the layout in `KMP/port.json`.
 
 When the BitTorrent daemon starts, the Client attempts to map its TCP and UDP
 listen port through UPnP and then NAT-PMP. The lease is renewed while the
