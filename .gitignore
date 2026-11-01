@@ -8,3 +8,5 @@ dists/
 KMP/libs.*/aria2c
 *.pem
 *.zip
+*.key
+*.key.pub

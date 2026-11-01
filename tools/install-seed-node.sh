@@ -15,7 +15,12 @@ for command_name in python3 openssl systemctl; do
     }
 done
 
-torrentd_binary="$repo_dir/build/torrentd/kmp-torrentd-linux-amd64"
+case "$(uname -m)" in
+    x86_64|amd64) torrentd_arch=amd64 ;;
+    aarch64|arm64) torrentd_arch=arm64 ;;
+    *) echo "arquitetura sem binário do kmp-torrentd: $(uname -m)" >&2; exit 1 ;;
+esac
+torrentd_binary="$repo_dir/build/torrentd/kmp-torrentd-linux-$torrentd_arch"
 [ -x "$torrentd_binary" ] || {
     echo "binário ausente: execute tools/build-torrentd.sh antes da instalação" >&2
     exit 1
@@ -41,6 +46,20 @@ fi
 install -m 0644 "$repo_dir/KMP/catalog-sources.txt" /etc/kmp-seed/catalog-sources.txt
 install -m 0644 "$repo_dir/deploy/kmp-seed/kmp-seed.service" \
     /etc/systemd/system/kmp-seed.service
+
+# Imagens Ubuntu da Oracle Cloud trazem regras iptables que rejeitam toda entrada
+# além do SSH; sem estas exceções o nó nunca recebe peers.
+if [ -f /etc/iptables/rules.v4 ] && command -v netfilter-persistent >/dev/null 2>&1; then
+    for protocol in tcp udp; do
+        iptables -C INPUT -p "$protocol" --dport 6881 -j ACCEPT 2>/dev/null ||
+            iptables -I INPUT 1 -p "$protocol" --dport 6881 -j ACCEPT
+        if [ -f /etc/iptables/rules.v6 ]; then
+            ip6tables -C INPUT -p "$protocol" --dport 6881 -j ACCEPT 2>/dev/null ||
+                ip6tables -I INPUT 1 -p "$protocol" --dport 6881 -j ACCEPT
+        fi
+    done
+    netfilter-persistent save
+fi
 
 systemctl daemon-reload
 systemctl enable --now kmp-seed.service

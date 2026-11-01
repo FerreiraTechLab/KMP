@@ -128,7 +128,10 @@ class Aria2:
             arguments = [self.binary, f"--rpc-listen=127.0.0.1:{self.rpc_port}",
                          f"--rpc-secret={self.secret}",
                          f"--state-dir={self.root / 'torrentd'}", f"--data-dir={data}",
-                         f"--listen-port={self.listen_port}", "--upload-limit=0"]
+                         f"--listen-port={self.listen_port}", "--upload-limit=0",
+                         # O nó público só apresenta (BEP 55) peers conectados a ele ao
+                         # mesmo tempo; os limites de handheld o tornariam um gargalo.
+                         "--max-conns-per-torrent=200", "--half-open-per-torrent=25"]
         else:
             arguments = [self.binary, "--enable-rpc=true", "--rpc-listen-all=false",
                          f"--rpc-listen-port={self.rpc_port}", f"--rpc-secret={self.secret}",
@@ -231,11 +234,17 @@ class SeedNode:
         if head.get("catalogTorrent"):
             info_hash = head["catalogMagnet"].split("urn:btih:", 1)[1].split("&", 1)[0]
             torrents.append((head["catalogTorrent"], info_hash))
+        from_swarm = []
         for download in catalogue_downloads(document):
             package = download["packageFile"]
-            download_file(self.sources, "packages/" + quote(package),
-                          self.root / "data" / package,
-                          download["sizeBytes"], download["sha256"])
+            try:
+                download_file(self.sources, "packages/" + quote(package),
+                              self.root / "data" / package,
+                              download["sizeBytes"], download["sha256"])
+            except VerificationError:
+                # Pacotes acima do limite do Git não ficam nos mirrors; o próprio
+                # torrent os obtém por webseed e peers, verificando cada peça.
+                from_swarm.append(package)
             torrents.append((download["torrent"], download["infoHash"]))
         for encoded, info_hash in torrents:
             self.aria.ensure_torrent(encoded, info_hash)
@@ -251,7 +260,7 @@ class SeedNode:
 
         status = {"ok": True, "sequence": head["sequence"],
                   "catalogItems": len(document["items"]),
-                  "managedTorrents": len(torrents),
+                  "managedTorrents": len(torrents), "packagesFromSwarm": from_swarm,
                   "aria2Torrents": len(self.aria.entries()),
                   "listenPort": self.args.listen_port,
                   "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
