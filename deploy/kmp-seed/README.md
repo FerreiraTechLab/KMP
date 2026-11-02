@@ -51,3 +51,25 @@ sudo cat /var/lib/kmp-seed/status.json
 `packagesFromSwarm` em `status.json` lista os pacotes obtidos pelo torrent em
 vez dos mirrors. Os dados e a chave pública rotacionável ficam em
 `/var/lib/kmp-seed`. A lista de mirrors fica em `/etc/kmp-seed`.
+
+O nó também semeia submissões em revisão permitidas por
+`submission-seeding.json` no KMP-catalog (autores confiáveis ou PRs com o rótulo
+configurado). O estado delas fica em `/var/lib/kmp-seed/submissions.json`.
+
+## Monitoramento e recuperação
+
+O repositório privado `kmp-port-probe` roda o workflow `Seed node monitor` a
+cada seis horas: ele lê `seed-nodes.json` e o `head.json` do catálogo e exige que
+cada nó responda por TCP, DHT e uTP e semeie o torrent do catálogo atual. Se um
+nó continuar fora após três tentativas, o workflow falha e o GitHub avisa por
+e-mail.
+
+A Oracle Cloud pode recuperar instâncias Always Free ociosas (CPU e rede abaixo
+de 20% no percentil 95 por 7 dias). Se o aviso chegar:
+
+1. crie uma instância nova (Ubuntu, sub-rede pública com IPv4 público);
+2. libere TCP e UDP 6881 na Security List da sub-rede;
+3. gere os binários (`tools/build-torrentd.sh`) e rode
+   `tools/deploy-seed-node.sh <ip> <chave-ssh>`;
+4. se o IP mudou, atualize `seed-nodes.json` no KMP-catalog. O push publica uma
+   nova sequência do catálogo, e os clientes passam a usar o endereço novo.
