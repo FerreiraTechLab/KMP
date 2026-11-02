@@ -61,8 +61,18 @@ if [ -f /etc/iptables/rules.v4 ] && command -v netfilter-persistent >/dev/null 2
     netfilter-persistent save
 fi
 
+# KMP_SEED_KEEPALIVE=1 mantém uma carga ociosa de CPU para que provedores como a
+# Oracle Cloud não recuperem a instância gratuita por ociosidade.
+if [ "${KMP_SEED_KEEPALIVE:-0}" = 1 ]; then
+    install -m 0644 "$repo_dir/deploy/kmp-seed/kmp-keepalive.service" \
+        /etc/systemd/system/kmp-keepalive.service
+fi
+
 systemctl daemon-reload
 systemctl enable --now kmp-seed.service
+if [ "${KMP_SEED_KEEPALIVE:-0}" = 1 ]; then
+    systemctl enable --now kmp-keepalive.service
+fi
 systemctl --no-pager --full status kmp-seed.service
 
 cat <<'EOF'

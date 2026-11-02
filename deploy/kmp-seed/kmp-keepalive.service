@@ -1,0 +1,24 @@
+[Unit]
+Description=KMP seed node CPU keepalive against idle Always Free reclamation
+After=kmp-seed.service
+
+# A Oracle Cloud pode recuperar instâncias Always Free cujo percentil 95 de CPU fica
+# abaixo de 20% por 7 dias. Este laço mantém a instância acima disso sem disputar CPU:
+# SCHED_IDLE só o executa quando nenhum outro processo, como o kmp-torrentd, precisa
+# do processador. Na E2.1.Micro o hipervisor retém parte do tempo (steal): 60% de um
+# núcleo apareceram como só 20% de uso na instância, então o teto é um núcleo inteiro.
+[Service]
+Type=simple
+ExecStart=/bin/sh -c 'while :; do :; done'
+CPUSchedulingPolicy=idle
+Nice=19
+CPUQuota=100%
+DynamicUser=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
