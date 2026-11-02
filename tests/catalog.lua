@@ -84,4 +84,14 @@ assert(Catalog.validate({schemaVersion = 1, items = {client}}) == nil)
 profile.architecture = "armhf"
 local incompatible, _, incompatibleMetadata = Catalog.validate(v3document, profile)
 assert(incompatible and #incompatible == 0 and incompatibleMetadata.incompatible == 1)
+
+-- Nós públicos inválidos são ignorados sem invalidar o catálogo.
+v3document.extensions = {["kmp.seed-nodes"] = {"163.176.18.211:6881", "163.176.18.211:6881",
+    "300.1.1.1:6881", "1.2.3.4:0", "1.2.3.4", 7, "8.8.8.8:65535"}}
+local _, _, seededMetadata = Catalog.validate(v3document, profile)
+assert(#seededMetadata.seedNodes == 2)
+assert(seededMetadata.seedNodes[1] == "163.176.18.211:6881" and seededMetadata.seedNodes[2] == "8.8.8.8:65535")
+v3document.extensions = {["kmp.seed-nodes"] = "163.176.18.211:6881"}
+assert(#select(3, Catalog.validate(v3document, profile)).seedNodes == 0)
+assert(#Catalog.seedNodes({schemaVersion = 2, extensions = {["kmp.seed-nodes"] = {"1.2.3.4:6881"}}}) == 0)
 print("catalog tests: ok")

@@ -106,6 +106,13 @@ function Torrent:start(item, directory)
         end
         magnet = magnet .. "&x.pe=" .. self.settings.peer
     end
+    -- Nós públicos do catálogo assinado: um peer sempre alcançável e uma ponte de
+    -- hole punching, mesmo antes de trackers e DHT responderem.
+    for _, node in ipairs(type(item.seedNodes) == "table" and item.seedNodes or {}) do
+        if type(node) == "string" and node:match("^%d+%.%d+%.%d+%.%d+:%d+$") then
+            magnet = magnet .. "&x.pe=" .. node
+        end
+    end
     local options = {
         dir = directory,
         ["continue"] = "true",

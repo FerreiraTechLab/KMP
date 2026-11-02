@@ -398,6 +398,7 @@ local function decodeCatalog(content)
     if not items then return nil, validationError end
     for _, item in ipairs(items) do
         item.catalogSequence = metadata and metadata.sequence or 0
+        item.seedNodes = metadata and metadata.seedNodes or {}
         item.filename = item.packageFile
         item.size = item.sizeBytes < 1048576 and
             string.format("%.1f KB", item.sizeBytes / 1024) or

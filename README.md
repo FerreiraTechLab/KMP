@@ -59,6 +59,12 @@ connection; package bytes still travel directly between peers. Router mapping
 is attempted as an additional path and is not required when hole punching or a
 public IPv6 path succeeds. aria2 remains a launcher fallback during migration.
 
+The signed catalogue lists always-reachable public seed nodes in
+`extensions["kmp.seed-nodes"]` (`IPv4:port`, see `deploy/kmp-seed`). The Client
+adds each one to the package magnet as `x.pe`, so every download starts with a
+reachable peer and a hole-punching rendezvous even before trackers or DHT
+answer. Invalid entries are ignored and never block the catalogue.
+
 Every new Client starts with **Nó comunitário** enabled and can disable or
 enable it at any time in the options menu. The
 optional `community_storage_mb=4096` setting controls its storage allowance.

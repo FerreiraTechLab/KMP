@@ -173,6 +173,26 @@ local function validateItem(item, ids, portIds, roots, requirePackageHash)
     return item
 end
 
+-- O catálogo assinado já é validado em Python; aqui uma entrada inválida só é
+-- ignorada, para que os nós públicos nunca impeçam o uso do catálogo.
+function Catalog.seedNodes(document)
+    local extensions = type(document) == "table" and document.schemaVersion == 3 and
+        type(document.extensions) == "table" and document.extensions or {}
+    local nodes, seen = {}, {}
+    local listed = extensions["kmp.seed-nodes"]
+    for _, node in ipairs(type(listed) == "table" and listed or {}) do
+        local a, b, c, d, port = tostring(node):match("^(%d+)%.(%d+)%.(%d+)%.(%d+):(%d+)$")
+        local valid = type(node) == "string" and a and tonumber(port) >= 1 and tonumber(port) <= 65535
+        for _, octet in ipairs(valid and {a, b, c, d} or {}) do
+            if tonumber(octet) > 255 then valid = false end
+        end
+        if valid and not seen[node] and #nodes < 16 then
+            nodes[#nodes + 1] = node; seen[node] = true
+        end
+    end
+    return nodes
+end
+
 function Catalog.validate(document, profile)
     if type(document) ~= "table" or type(document.items) ~= "table" then
         return nil, "versão ou formato do catálogo inválido"
@@ -219,7 +239,8 @@ function Catalog.validate(document, profile)
     end
     return items, nil, {schemaVersion = document.schemaVersion,
         sequence = document.sequence, generatedAt = document.generatedAt,
-        incompatible = incompatible, revocations = document.revocations or {}}
+        incompatible = incompatible, revocations = document.revocations or {},
+        seedNodes = Catalog.seedNodes(document)}
 end
 
 function Catalog.search(items, query)

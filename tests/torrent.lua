@@ -98,6 +98,14 @@ assert(peerOnlyMethod == "aria2.addUri")
 assert(not peerOnlyMagnet:find("&ws=", 1, true))
 assert(peerOnlyMagnet:find("&x.pe=192.168.1.10:6881", 1, true))
 
+-- Nós públicos do catálogo entram como peers diretos, inclusive no teste só P2P.
+local seededMagnet = assert(peerOnly:start({
+    magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash,
+    seedNodes = {"163.176.18.211:6881", "inválido&x=1", 7}
+}, "/tmp/kmp"))
+assert(seededMagnet:find("&x.pe=163.176.18.211:6881", 1, true))
+assert(not seededMagnet:find("inválido", 1, true))
+
 local limitedOptions
 local limitedPeerOnly = Torrent.new(function(method, params)
     if method:match("^aria2%.tell") then return {} end

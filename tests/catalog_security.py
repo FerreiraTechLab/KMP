@@ -148,6 +148,19 @@ class CatalogSecurityTest(unittest.TestCase):
         with self.assertRaisesRegex(SECURITY.VerificationError, "bloqueado"):
             SECURITY.validate_catalog_document(document, document["sequence"])
 
+    def test_catalog_v3_seed_nodes_extension_is_validated(self):
+        document = json.loads((ROOT / "contract-examples/catalog-v3.json").read_text())
+        document["extensions"] = {"kmp.seed-nodes": ["163.176.18.211:6881"], "example.other": {"x": 1}}
+        SECURITY.validate_catalog_document(document, document["sequence"])
+        for invalid in (["163.176.18.211"], ["999.1.1.1:6881"], ["1.2.3.4:0"], ["1.2.3.4:6881"] * 2,
+                        "1.2.3.4:6881", [7]):
+            document["extensions"] = {"kmp.seed-nodes": invalid}
+            with self.assertRaisesRegex(SECURITY.VerificationError, "nós públicos"):
+                SECURITY.validate_catalog_document(document, document["sequence"])
+        document["extensions"] = {"Invalid Name": {}}
+        with self.assertRaisesRegex(SECURITY.VerificationError, "extensões"):
+            SECURITY.validate_catalog_document(document, document["sequence"])
+
     def test_catalog_release_tool_accepts_v3(self):
         output = self.root / "release-v3"
         source = ROOT / "contract-examples/catalog-v3.json"
