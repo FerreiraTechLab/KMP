@@ -321,7 +321,7 @@ class SubmissionSeeder:
         policy = self.load_policy()
         api = f"https://api.github.com/repos/{self.repository}"
         pulls = json.loads(self.fetch(f"{api}/pulls?state=open&per_page=50", 4 << 20, api=True))
-        wanted, errors, budget, heads = {}, [], policy["maxTotalBytes"], set()
+        candidates, errors, heads, complete = [], [], set(), True
         for pull in pulls:
             if not submission_eligible(pull, policy):
                 continue
@@ -334,24 +334,46 @@ class SubmissionSeeder:
                     self.files[sha] = [item["raw_url"] for item in listed
                                        if item.get("status") != "removed" and
                                        SUBMISSION_TORRENT.match(item.get("filename", ""))]
-                for raw_url in self.files[sha]:
-                    if raw_url not in self.torrents:
-                        self.torrents[raw_url] = sanitize_submission_torrent(
-                            self.fetch(raw_url, 4 << 20), policy["maxPackageBytes"])
-                    info_hash, length, torrent = self.torrents[raw_url]
-                    if info_hash in wanted:
-                        continue
-                    if info_hash not in catalog_hashes:
-                        if length > budget:
-                            raise VerificationError("limite total de submissões do nó atingido")
-                        budget -= length
-                    self.aria.ensure_torrent(base64.b64encode(torrent).decode(), info_hash,
-                                             self.directory / info_hash)
-                    wanted[info_hash] = {"pull": number, "sizeBytes": length,
-                                         "author": (pull.get("user") or {}).get("login")}
             except (HTTPError, URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
                 errors.append(f"PR #{number}: {exc}")
-        for info_hash, entry in self.aria.entries().items():
+                complete = False
+                continue
+            meta = {"pull": number, "author": (pull.get("user") or {}).get("login")}
+            for raw_url in self.files[sha]:
+                candidates.append((f"PR #{number}", raw_url,
+                                   lambda url=raw_url: self.fetch(url, 4 << 20), meta))
+        # Um PR mesclado fecha antes da promoção, e a revalidação do workflow de publicação
+        # baixa o pacote do swarm; por isso as submissões na branch principal também ficam.
+        try:
+            tree = json.loads(self.fetch(f"{api}/git/trees/HEAD?recursive=1", 16 << 20, api=True))
+            for item in tree.get("tree", []):
+                if item.get("type") == "blob" and SUBMISSION_TORRENT.match(item.get("path", "")):
+                    blob = f"{api}/git/blobs/{item['sha']}"
+                    candidates.append((item["path"], blob, lambda url=blob: base64.b64decode(
+                        json.loads(self.fetch(url, 8 << 20, api=True))["content"]), {"merged": item["path"]}))
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
+            errors.append(f"submissões mescladas: {exc}")
+            complete = False
+        wanted, budget = {}, policy["maxTotalBytes"]
+        for label, key, payload, meta in candidates:
+            try:
+                if key not in self.torrents:
+                    self.torrents[key] = sanitize_submission_torrent(payload(), policy["maxPackageBytes"])
+                info_hash, length, torrent = self.torrents[key]
+                if info_hash in wanted:
+                    continue
+                if info_hash not in catalog_hashes:
+                    if length > budget:
+                        raise VerificationError("limite total de submissões do nó atingido")
+                    budget -= length
+                self.aria.ensure_torrent(base64.b64encode(torrent).decode(), info_hash,
+                                         self.directory / info_hash)
+                wanted[info_hash] = {"sizeBytes": length, **meta}
+            except (HTTPError, URLError, TimeoutError, OSError, ValueError, KeyError) as exc:
+                errors.append(f"{label}: {exc}")
+                complete = False
+        # Uma listagem incompleta não pode virar exclusão: só limpa quando tudo foi consultado.
+        for info_hash, entry in self.aria.entries().items() if complete else ():
             directory = Path(entry.get("dir") or "/")
             if (directory.parent.resolve() != self.directory.resolve() or
                     info_hash in wanted or info_hash in catalog_hashes):
@@ -359,8 +381,8 @@ class SubmissionSeeder:
             self.aria.remove(entry["gid"])
             shutil.rmtree(directory, ignore_errors=True)
         self.files = {sha: urls for sha, urls in self.files.items() if sha in heads}
-        kept = {url for urls in self.files.values() for url in urls}
-        self.torrents = {url: value for url, value in self.torrents.items() if url in kept}
+        kept = {key for _, key, _, _ in candidates}
+        self.torrents = {key: value for key, value in self.torrents.items() if key in kept}
         return {"submissions": wanted, "errors": errors,
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 

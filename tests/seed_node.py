@@ -97,10 +97,15 @@ class SeedNodeTests(unittest.TestCase):
                      "raw_url": "https://raw/submission.json"}]).encode(),
                 "https://raw/game.torrent": payload,
             }
-            requested = []
+            tree, tree_fails, requested = [], False, []
             def fetch(url, limit, api=False):
                 requested.append(url)
                 if url.endswith("per_page=50"): return json.dumps(pulls).encode()
+                if "/git/trees/" in url:
+                    if tree_fails: raise MODULE.URLError("API indisponível")
+                    return json.dumps({"tree": tree}).encode()
+                if "/git/blobs/" in url:
+                    return json.dumps({"content": __import__("base64").b64encode(payload).decode()}).encode()
                 return responses[url]
             seeder.fetch = fetch
             status = seeder.sync(set())
@@ -110,7 +115,21 @@ class SeedNodeTests(unittest.TestCase):
             self.assertFalse(any("pulls/4" in url for url in requested))
             (Path(directory) / "submissions" / info_hash).mkdir(parents=True)
 
+            # Mesclado: o PR fecha, mas a submissão segue na branch principal até a promoção.
             pulls = []
+            tree = [{"type": "blob", "path": "submissions/game/1.0/torrents/game.torrent", "sha": "b1"}]
+            status = seeder.sync(set())
+            self.assertEqual(status["submissions"][info_hash]["merged"], tree[0]["path"])
+            self.assertEqual(aria.removed, [])
+
+            # Uma falha na listagem nunca apaga pacotes.
+            tree_fails = True
+            status = seeder.sync(set())
+            self.assertEqual(aria.removed, [])
+            self.assertTrue(status["errors"])
+
+            # Promovida e removida de submissions/: aí sim o torrent sai.
+            tree, tree_fails = [], False
             seeder.sync(set())
             self.assertEqual(aria.removed, ["g-" + info_hash[:4]])
             self.assertFalse((Path(directory) / "submissions" / info_hash).exists())
