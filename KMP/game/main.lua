@@ -4,6 +4,7 @@
 
 local Json = require("json")
 local Catalog = require("catalog")
+local utf8 = require("utf8")
 local APP_VERSION = require("version")
 local CATALOG_URL = os.getenv("KMP_CATALOG_URL") or ""
 local CATALOG_SYNC = os.getenv("KMP_CATALOG_SYNC") or ""
@@ -31,6 +32,21 @@ local sdPaths = { "/roms/ports", "/roms2/ports" }
 local sdLabels = { "SD1 (/roms)", "SD2 (/roms2)" }
 local currentSd = 1
 local scrollY = 0
+local scrollTarget = 0
+
+-- Loja: abas filtram o catálogo e a grade mostra três cartões por linha.
+local STORE_TABS = {"Início", "Instalados", "Atualizações"}
+local storeTab = 1
+local GRID_COLUMNS = 3
+local GRID_TOP, GRID_BOTTOM = 116, 418
+local CARD_W, CARD_H, CARD_GAP = 188, 140, 12
+local detailsScroll = 0
+local detailsScrollMax = 0
+local detailsScrollStep = 19
+-- Direcional segurado repete o movimento; o analógico vira direcional com histerese.
+local heldInput = nil
+local axisDirection = {leftx = 0, lefty = 0}
+local updateHeldInput
 
 local scale = 1
 local offsetX = 0
@@ -123,7 +139,7 @@ local catalogRevocations = {}
 local clientUpdate = nil
 local incompatiblePorts = 0
 local selectedIdx = 1
-local fontTitle, fontItem, fontSub, fontSmall
+local fontTitle, fontItem, fontSub, fontSmall, fontTiny, fontBig, fontIcon, fontIconBig
 local syncStatus = "Conectando..."
 local isOffline = true
 local syncing = false
@@ -156,6 +172,36 @@ local function installedRecord(game)
     return nil
 end
 
+local function inStoreTab(game)
+    if storeTab == 2 then return game.installed end
+    if storeTab == 3 then return game.installed and (game.updateAvailable or game.revocation ~= nil) end
+    return true
+end
+
+-- Refaz a lista visível; com keepSelection o mesmo port continua selecionado.
+local function refreshView(keepSelection)
+    local selectedId = keepSelection and catalog[selectedIdx] and catalog[selectedIdx].id
+    catalog = {}
+    for _, game in ipairs(Catalog.search(catalogAll, searchQuery)) do
+        if inStoreTab(game) then catalog[#catalog + 1] = game end
+    end
+    selectedIdx = 1
+    for index, game in ipairs(catalog) do
+        if game.id == selectedId then selectedIdx = index; break end
+    end
+    if not selectedId then scrollY, scrollTarget = 0, 0 end
+end
+
+local function countTab(tab)
+    local saved, count = storeTab, 0
+    storeTab = tab
+    for _, game in ipairs(catalogAll) do
+        if inStoreTab(game) then count = count + 1 end
+    end
+    storeTab = saved
+    return count
+end
+
 local function checkLocalFiles()
     for _, game in ipairs(catalogAll) do
         local record = installedRecord(game)
@@ -173,12 +219,16 @@ local function checkLocalFiles()
         game.updateAvailable = record ~= nil and Catalog.isUpdate(
             record.version, game.version, record.revision, game.revision)
     end
+    refreshView(true)
 end
 
 local function applySearch()
-    catalog = Catalog.search(catalogAll, searchQuery)
-    selectedIdx = 1
-    scrollY = 0
+    refreshView(false)
+end
+
+local function switchTab(delta)
+    storeTab = (storeTab - 1 + delta) % #STORE_TABS + 1
+    refreshView(false)
 end
 
 local function startSeedStatus(game)
@@ -478,6 +528,10 @@ function love.load()
     fontItem  = love.graphics.newFont(16)
     fontSub   = love.graphics.newFont(12)
     fontSmall = love.graphics.newFont(12)
+    fontTiny  = love.graphics.newFont(10)
+    fontBig   = love.graphics.newFont(22)
+    fontIcon  = love.graphics.newFont(22)
+    fontIconBig = love.graphics.newFont(34)
 
     if not love.filesystem.getInfo("/roms/ports") and love.filesystem.getInfo("/roms2/ports") then
         currentSd = 2
@@ -504,6 +558,8 @@ function love.load()
 end
 
 function love.update(dt)
+    updateHeldInput(dt)
+    scrollY = scrollY + (scrollTarget - scrollY) * math.min(1, dt * 14)
     if diagnostic.active then
         local event = love.thread.getChannel("diagnostic_done"):pop()
         if event then
@@ -580,7 +636,7 @@ function love.update(dt)
         if torrentEvent.kind == "peer_test" then
             download.phase = "p2p"
             download.progress = 0
-            download.statusText = "Teste P2P: removendo o pacote local e desativando HTTPS..."
+            download.statusText = "Só P2P: removendo o pacote local e desativando HTTPS..."
             download.statusColor = {0.95, 0.7, 0.2}
         elseif torrentEvent.kind == "cached" then
             download.phase = "cache"
@@ -592,7 +648,7 @@ function love.update(dt)
         elseif torrentEvent.kind == "started" then
             download.phase = "conectando"
             download.statusText = download.peerOnly and
-                "Teste P2P iniciado; procurando somente outros consoles..." or
+                "Download só P2P iniciado; procurando somente peers..." or
                 "Torrent iniciado; procurando fontes..."
             download.statusColor = {0.0, 0.82, 1.0}
         elseif torrentEvent.kind == "progress" then
@@ -964,34 +1020,35 @@ local function loadCatalogTrust()
     end
 end
 
-local function handleNavUp()
+-- Na grade, cima/baixo pulam uma linha inteira e param nas bordas, como numa loja;
+-- esquerda/direita seguem a ordem do catálogo.
+local function moveSelection(delta)
     if download.active or syncing or #catalog == 0 then return end
-    selectedIdx = selectedIdx - 1
-    if selectedIdx < 1 then selectedIdx = #catalog end
+    selectedIdx = math.max(1, math.min(#catalog, selectedIdx + delta))
+end
+
+local function handleNavUp()
+    if selectedIdx > GRID_COLUMNS then moveSelection(-GRID_COLUMNS) end
 end
 
 local function handleNavDown()
-    if download.active or syncing or #catalog == 0 then return end
-    selectedIdx = selectedIdx + 1
-    if selectedIdx > #catalog then selectedIdx = 1 end
+    local lastRow = math.ceil(#catalog / GRID_COLUMNS)
+    if math.ceil(selectedIdx / GRID_COLUMNS) < lastRow then moveSelection(GRID_COLUMNS) end
 end
 
-local function handleNavPageUp()
-    if download.active or syncing or #catalog == 0 then return end
-    selectedIdx = selectedIdx - 5
-    if selectedIdx < 1 then selectedIdx = 1 end
-end
+local function handleNavLeft() moveSelection(-1) end
+local function handleNavRight() moveSelection(1) end
 
-local function handleNavPageDown()
-    if download.active or syncing or #catalog == 0 then return end
-    selectedIdx = selectedIdx + 5
-    if selectedIdx > #catalog then selectedIdx = #catalog end
+local function handleTab(delta)
+    if download.active or syncing then return end
+    switchTab(delta)
 end
 
 local function handleActionConfirm()
     if download.active or syncing or #catalog == 0 then return end
     local game = catalog[selectedIdx]
     showDetails = true
+    detailsScroll = 0
     detailsSeed = {loading = false, found = false}
     detailsSeedLastRefresh = 0
     startSeedStatus(game)
@@ -1103,6 +1160,7 @@ if TEST_MODE then
             showMenu, showSearch, showDetails = false, false, false
             showUninstallPopup, showRestartPopup, showClientUpdatePopup = false, false, false
             menuSelected, powerMenuSelected, selectedIdx = 1, 1, 1
+            storeTab, heldInput, axisDirection = 1, nil, {leftx = 0, lefty = 0}
             searchQuery, searchSelected = "", 1
             syncing = false
             download = {active = false, phase = "none", progress = 0, ext_progress = 0,
@@ -1125,12 +1183,12 @@ if TEST_MODE then
                 searchQuery = searchQuery, downloadActive = download.active,
                 downloadStatus = download.statusText, diagnostic = diagnostic,
                 clientUpdate = clientUpdate, showClientUpdatePopup = showClientUpdatePopup,
-                installedPorts = #installedPorts}
+                installedPorts = #installedPorts, storeTab = storeTab, visiblePorts = #catalog}
         end,
     }
 end
 
-function love.keypressed(key)
+local function onKey(key)
     if appState == "splash" then return end
 
     if showClientUpdatePopup then
@@ -1199,6 +1257,8 @@ function love.keypressed(key)
             showDetails = false
             startDownload(game, true)
         elseif key == "y" and game.installed then startSeedAction("resume_all", game)
+        elseif key == "up" or key == "w" then detailsScroll = math.max(0, detailsScroll - detailsScrollStep)
+        elseif key == "down" or key == "s" then detailsScroll = math.min(detailsScrollMax, detailsScroll + detailsScrollStep)
         elseif key == "b" or key == "space" or key == "escape" or key == "backspace" then
             showDetails = false
         end
@@ -1302,8 +1362,10 @@ function love.keypressed(key)
 
     if key == "up" or key == "w" then handleNavUp()
     elseif key == "down" or key == "s" then handleNavDown()
-    elseif key == "pageup" then handleNavPageUp()
-    elseif key == "pagedown" then handleNavPageDown()
+    elseif key == "left" then handleNavLeft()
+    elseif key == "right" then handleNavRight()
+    elseif key == "pageup" then handleTab(-1)
+    elseif key == "pagedown" then handleTab(1)
     elseif key == "b" or key == "return" then handleActionConfirm()
     elseif key == "x" then toggleMusic()
     elseif key == "y" then handleActionReload()
@@ -1320,7 +1382,7 @@ function love.textinput(text)
     end
 end
 
-function love.gamepadpressed(joystick, button)
+local function onGamepadButton(joystick, button)
     if appState == "splash" then return end
 
     if showClientUpdatePopup then
@@ -1390,6 +1452,8 @@ function love.gamepadpressed(joystick, button)
             startDownload(game, true)
         elseif button == "y" and game.installed then
             startSeedAction("resume_all", game)
+        elseif button == "dpup" then detailsScroll = math.max(0, detailsScroll - detailsScrollStep)
+        elseif button == "dpdown" then detailsScroll = math.min(detailsScrollMax, detailsScroll + detailsScrollStep)
         elseif button == "b" or button == "back" or button == "start" then showDetails = false end
         return
     end
@@ -1491,8 +1555,10 @@ function love.gamepadpressed(joystick, button)
 
     if button == "dpup" then handleNavUp()
     elseif button == "dpdown" then handleNavDown()
-    elseif button == "leftshoulder" then handleNavPageUp()
-    elseif button == "rightshoulder" then handleNavPageDown()
+    elseif button == "dpleft" then handleNavLeft()
+    elseif button == "dpright" then handleNavRight()
+    elseif button == "leftshoulder" then handleTab(-1)
+    elseif button == "rightshoulder" then handleTab(1)
     elseif button == "a" then handleActionConfirm()
     elseif button == "x" then toggleMusic()
     elseif button == "y" then handleActionReload()
@@ -1502,37 +1568,461 @@ function love.gamepadpressed(joystick, button)
     end
 end
 
+local REPEAT_DELAY, REPEAT_INTERVAL = 0.32, 0.075
+local REPEATABLE_BUTTONS = {dpup = true, dpdown = true, dpleft = true, dpright = true}
+local REPEATABLE_KEYS = {up = true, down = true, left = true, right = true, w = true, s = true}
+
+function love.keypressed(key)
+    onKey(key)
+    if REPEATABLE_KEYS[key] then heldInput = {kind = "key", id = key, timer = REPEAT_DELAY} end
+end
+
+function love.keyreleased(key)
+    if heldInput and heldInput.kind == "key" and heldInput.id == key then heldInput = nil end
+end
+
+function love.gamepadpressed(joystick, button)
+    onGamepadButton(joystick, button)
+    if REPEATABLE_BUTTONS[button] then heldInput = {kind = "pad", id = button, timer = REPEAT_DELAY} end
+end
+
+function love.gamepadreleased(joystick, button)
+    if heldInput and heldInput.kind == "pad" and heldInput.id == button then heldInput = nil end
+end
+
+function updateHeldInput(dt)
+    if not heldInput then return end
+    heldInput.timer = heldInput.timer - dt
+    while heldInput and heldInput.timer <= 0 do
+        heldInput.timer = heldInput.timer + REPEAT_INTERVAL
+        if heldInput.kind == "pad" then onGamepadButton(nil, heldInput.id) else onKey(heldInput.id) end
+    end
+end
+
+-- Cada evento do analógico acima do limite movia a seleção de novo, e ela saltava
+-- vários itens; agora o eixo vira um direcional que só dispara ao cruzar o limite.
 function love.gamepadaxis(joystick, axis, value)
-    if appState == "splash" or showRestartPopup or showClientUpdatePopup or showSearch or
-       showDetails or download.active or syncing then return end
-    
-    if axis == "lefty" then
-        if value < -0.6 then
-            if appState == "power_menu" then
-                powerMenuSelected = powerMenuSelected - 1
-                if powerMenuSelected < 1 then powerMenuSelected = 3 end
-            elseif appState == "uninstaller" and not showUninstallPopup then
-                handleUninstallerNavUp()
-            elseif showMenu then
-                menuSelected = menuSelected - 1
-                if menuSelected < 1 then menuSelected = 8 end
-            elseif not showMenu and appState == "main" then 
-                handleNavUp() 
-            end
-        elseif value > 0.6 then
-            if appState == "power_menu" then
-                powerMenuSelected = powerMenuSelected + 1
-                if powerMenuSelected > 3 then powerMenuSelected = 1 end
-            elseif appState == "uninstaller" and not showUninstallPopup then
-                handleUninstallerNavDown()
-            elseif showMenu then
-                menuSelected = menuSelected + 1
-                if menuSelected > 8 then menuSelected = 1 end
-            elseif not showMenu and appState == "main" then 
-                handleNavDown() 
-            end
+    if axisDirection[axis] == nil then return end
+    local previous = axisDirection[axis]
+    local direction = previous
+    if math.abs(value) >= 0.6 then direction = value < 0 and -1 or 1
+    elseif math.abs(value) < 0.35 then direction = 0 end
+    if direction == previous then return end
+    local buttons = axis == "lefty" and {[-1] = "dpup", [1] = "dpdown"} or {[-1] = "dpleft", [1] = "dpright"}
+    if previous ~= 0 then love.gamepadreleased(joystick, buttons[previous]) end
+    axisDirection[axis] = direction
+    if direction ~= 0 then love.gamepadpressed(joystick, buttons[direction]) end
+end
+
+-- ============================================================
+-- LOJA: grade de cartões, abas e página do port
+-- ============================================================
+local ACCENT = {0.0, 0.82, 1.0}
+local ICON_COLORS = {
+    {0.16, 0.55, 0.98}, {0.96, 0.42, 0.25}, {0.20, 0.78, 0.52}, {0.70, 0.40, 0.98},
+    {0.98, 0.70, 0.18}, {0.95, 0.32, 0.55}, {0.18, 0.72, 0.82}, {0.55, 0.62, 0.95},
+}
+local SMALL_WORDS = {["for"] = true, ["of"] = true, ["the"] = true, ["and"] = true,
+    ["de"] = true, ["da"] = true, ["do"] = true, ["dos"] = true, ["das"] = true, ["e"] = true}
+
+-- Os testes usam fontes falsas sem métricas; nesses casos o texto passa sem corte.
+local function textWidth(font, text)
+    if font and font.getWidth then return font:getWidth(text) end
+    return #text * 7
+end
+
+local function ellipsize(font, text, width)
+    text = tostring(text or "")
+    if textWidth(font, text) <= width then return text end
+    while #text > 0 and textWidth(font, text .. "…") > width do
+        local cut = utf8.offset(text, -1) or #text
+        text = text:sub(1, cut - 1)
+    end
+    return text .. "…"
+end
+
+local function wrapLines(font, text, width, maxLines)
+    if not (font and font.getWrap) then return {tostring(text or "")} end
+    local _, lines = font:getWrap(tostring(text or ""), width)
+    if #lines > maxLines then
+        local kept = {}
+        for index = 1, maxLines do kept[index] = lines[index] end
+        kept[maxLines] = ellipsize(font, kept[maxLines] .. " " .. lines[maxLines + 1], width)
+        return kept
+    end
+    return lines
+end
+
+local function lineHeight(font, fallback)
+    return font and font.getHeight and font:getHeight() or fallback
+end
+
+local function initials(name)
+    local letters = {}
+    for word in tostring(name or ""):gmatch("[%w\128-\255]+") do
+        if not SMALL_WORDS[word:lower()] or #letters == 0 then
+            local first = word:sub(1, (utf8.offset(word, 2) or #word + 1) - 1)
+            letters[#letters + 1] = first:upper()
+            if #letters == 2 then break end
         end
     end
+    if #letters == 0 then return "?" end
+    return table.concat(letters)
+end
+
+local function iconColor(game)
+    local hash = 0
+    for index = 1, #(game.id or "") do hash = (hash * 31 + game.id:byte(index)) % 2147483647 end
+    return ICON_COLORS[hash % #ICON_COLORS + 1]
+end
+
+-- Sem capas no catálogo, cada port ganha um ícone com as iniciais e uma cor estável.
+local function drawIcon(game, x, y, size, font)
+    local color = iconColor(game)
+    love.graphics.setColor(color[1], color[2], color[3])
+    love.graphics.rectangle("fill", x, y, size, size, size * 0.24, size * 0.24)
+    love.graphics.setColor(1, 1, 1, 0.14)
+    love.graphics.rectangle("fill", x + size * 0.1, y + size * 0.08, size * 0.8, size * 0.1, size * 0.05, size * 0.05)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.setFont(font)
+    love.graphics.printf(initials(game.name), x, y + (size - lineHeight(font, size * 0.5)) / 2, size, "center")
+end
+
+local function storeStatus(game)
+    if game.revocation then return "ALERTA", {1.0, 0.35, 0.35} end
+    if game.updateAvailable then return "ATUALIZAR", {0.95, 0.65, 0.2} end
+    if game.installed then return "INSTALADO", {0.2, 0.85, 0.45} end
+    return "OBTER", ACCENT
+end
+
+local function drawChip(text, color, x, y, alignRight)
+    love.graphics.setFont(fontTiny)
+    local width = textWidth(fontTiny, text) + 14
+    if alignRight then x = x - width end
+    love.graphics.setColor(color[1], color[2], color[3], 0.16)
+    love.graphics.rectangle("fill", x, y, width, 18, 9, 9)
+    love.graphics.setColor(color[1], color[2], color[3])
+    love.graphics.printf(text, x, y + (18 - lineHeight(fontTiny, 12)) / 2, width, "center")
+    return width
+end
+
+local function porterName(game)
+    if type(game.porter) == "table" and game.porter.name then return game.porter.name end
+    return "Port da comunidade"
+end
+
+-- Coordenadas da área visível em pixels de tela, para o recorte com setScissor.
+local function scissor(x, y, width, height)
+    love.graphics.setScissor(offsetX + x * scale, offsetY + y * scale, width * scale, height * scale)
+end
+
+local function drawScrollbar(x, top, height, contentHeight, offset)
+    if contentHeight <= height then return end
+    local thumb = math.max(24, height * height / contentHeight)
+    local position = top + (height - thumb) * (offset / (contentHeight - height))
+    love.graphics.setColor(1, 1, 1, 0.06)
+    love.graphics.rectangle("fill", x, top, 3, height, 2, 2)
+    love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3], 0.7)
+    love.graphics.rectangle("fill", x, position, 3, thumb, 2, 2)
+end
+
+local function drawCard(game, x, y, selected)
+    love.graphics.setColor(selected and 0.13 or 0.10, selected and 0.17 or 0.12, selected and 0.24 or 0.17)
+    love.graphics.rectangle("fill", x, y, CARD_W, CARD_H, 12, 12)
+    if selected then
+        love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3], 0.9)
+        love.graphics.setLineWidth(2)
+        love.graphics.rectangle("line", x, y, CARD_W, CARD_H, 12, 12)
+    end
+
+    drawIcon(game, x + 12, y + 12, 52, fontIcon)
+    local status, color = storeStatus(game)
+    drawChip(status, color, x + CARD_W - 12, y + 12, true)
+    love.graphics.setFont(fontTiny)
+    love.graphics.setColor(0.55, 0.62, 0.72)
+    love.graphics.printf(game.size or "", x + 72, y + 38, CARD_W - 84, "right")
+    love.graphics.printf("v" .. tostring(game.version or "-"), x + 72, y + 52, CARD_W - 84, "right")
+
+    love.graphics.setFont(fontItem)
+    love.graphics.setColor(0.94, 0.96, 1.0)
+    local lines = wrapLines(fontItem, game.name, CARD_W - 24, 2)
+    local nameHeight = lineHeight(fontItem, 19)
+    for index, line in ipairs(lines) do
+        love.graphics.print(line, x + 12, y + 72 + (index - 1) * nameHeight)
+    end
+    love.graphics.setFont(fontSub)
+    love.graphics.setColor(0.48, 0.55, 0.66)
+    love.graphics.print(ellipsize(fontSub, porterName(game), CARD_W - 24), x + 12, y + 76 + #lines * nameHeight)
+end
+
+local function storeEmptyMessage()
+    if #catalogAll > 0 and searchQuery ~= "" then return "Nenhum resultado para: " .. searchQuery end
+    if storeTab == 2 and #catalogAll > 0 then return "Nenhum port instalado em " .. sdLabels[currentSd] .. "." end
+    if storeTab == 3 and #catalogAll > 0 then return "Tudo em dia: nenhuma atualização pendente." end
+    if syncStatus:find("(0 ports)", 1, true) then return "Nenhum homebrew no catálogo." end
+    if isOffline then return "Conexao ou leitura falhou." end
+    return "Aguardando lista de ports..."
+end
+
+local function drawStore()
+    love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3])
+    love.graphics.rectangle("fill", 24, 16, 46, 26, 7, 7)
+    love.graphics.setColor(0.02, 0.06, 0.10)
+    love.graphics.setFont(fontSub)
+    love.graphics.printf("KPM", 24, 22, 46, "center")
+    love.graphics.setFont(fontTitle)
+    love.graphics.setColor(0.96, 0.97, 1.0)
+    love.graphics.print("Loja de Ports", 80, 17)
+    love.graphics.setFont(fontTiny)
+    love.graphics.setColor(0.45, 0.52, 0.62)
+    love.graphics.print("v" .. APP_VERSION .. "  ·  " .. sdLabels[currentSd], 82, 39)
+
+    local pillColor = isOffline and {1.0, 0.4, 0.4} or ACCENT
+    love.graphics.setFont(fontSub)
+    local pillText = ellipsize(fontSub, syncStatus, 220)
+    local pillWidth = textWidth(fontSub, pillText) + 24
+    love.graphics.setColor(pillColor[1], pillColor[2], pillColor[3], 0.15)
+    love.graphics.rectangle("fill", 616 - pillWidth, 18, pillWidth, 22, 11, 11)
+    love.graphics.setColor(pillColor[1], pillColor[2], pillColor[3])
+    love.graphics.printf(pillText, 616 - pillWidth, 18 + (22 - lineHeight(fontSub, 14)) / 2, pillWidth, "center")
+
+    -- Abas: L1/R1 alternam entre todo o catálogo, instalados e atualizações.
+    local tabX = 24
+    for index, label in ipairs(STORE_TABS) do
+        local count = index > 1 and countTab(index) or 0
+        local text = count > 0 and (label .. "  " .. count) or label
+        love.graphics.setFont(fontItem)
+        local width = textWidth(fontItem, text) + 28
+        local active = index == storeTab
+        love.graphics.setColor(active and ACCENT[1] or 1, active and ACCENT[2] or 1, active and ACCENT[3] or 1,
+            active and 0.18 or 0.04)
+        love.graphics.rectangle("fill", tabX, 58, width, 30, 15, 15)
+        if index == 3 and count > 0 and not active then love.graphics.setColor(0.95, 0.65, 0.2)
+        elseif active then love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3])
+        else love.graphics.setColor(0.62, 0.68, 0.78) end
+        love.graphics.printf(text, tabX, 58 + (30 - lineHeight(fontItem, 18)) / 2, width, "center")
+        tabX = tabX + width + 8
+    end
+    love.graphics.setFont(fontTiny)
+    love.graphics.setColor(0.40, 0.46, 0.56)
+    love.graphics.printf("L1 / R1", tabX, 67, 616 - tabX, "right")
+
+    love.graphics.setFont(fontSub)
+    love.graphics.setColor(0.62, 0.68, 0.78)
+    local heading = searchQuery ~= "" and ("Busca: " .. searchQuery) or
+        ({"Todos os ports", "Instalados em " .. sdLabels[currentSd], "Atualizações e alertas"})[storeTab]
+    love.graphics.print(heading, 24, 96)
+    love.graphics.setColor(0.40, 0.46, 0.56)
+    love.graphics.printf(#catalog .. (#catalog == 1 and " port" or " ports"), 420, 96, 196, "right")
+
+    if #catalog == 0 then
+        love.graphics.setColor(0.45, 0.52, 0.62)
+        love.graphics.setFont(fontItem)
+        love.graphics.printf(storeEmptyMessage(), 24, 230, 592, "center")
+        if isOffline and #catalogAll == 0 then
+            love.graphics.setFont(fontSub)
+            love.graphics.setColor(1.0, 0.4, 0.4)
+            love.graphics.printf("Aperte (Y) para tentar de novo", 24, 260, 592, "center")
+        end
+        return
+    end
+
+    -- A linha selecionada sempre cabe inteira na área visível; update() anima até lá.
+    local pitch = CARD_H + CARD_GAP
+    local viewHeight = GRID_BOTTOM - GRID_TOP
+    local rows = math.ceil(#catalog / GRID_COLUMNS)
+    local contentHeight = rows * pitch - CARD_GAP
+    local rowTop = (math.ceil(selectedIdx / GRID_COLUMNS) - 1) * pitch
+    if rowTop < scrollTarget then scrollTarget = rowTop
+    elseif rowTop + CARD_H > scrollTarget + viewHeight then scrollTarget = rowTop + CARD_H - viewHeight end
+    scrollTarget = math.max(0, math.min(scrollTarget, math.max(0, contentHeight - viewHeight)))
+    scrollY = math.max(0, math.min(scrollY, math.max(0, contentHeight - viewHeight)))
+
+    scissor(0, GRID_TOP - 2, 640, viewHeight + 4)
+    for index, game in ipairs(catalog) do
+        local column = (index - 1) % GRID_COLUMNS
+        local row = math.floor((index - 1) / GRID_COLUMNS)
+        local y = GRID_TOP + row * pitch - scrollY
+        if y + CARD_H >= GRID_TOP - 2 and y <= GRID_BOTTOM + 2 then
+            drawCard(game, 24 + column * (CARD_W + CARD_GAP), y, index == selectedIdx)
+        end
+    end
+    love.graphics.setScissor()
+    drawScrollbar(630, GRID_TOP, viewHeight, contentHeight, scrollY)
+end
+
+-- Botão desenhado no rodapé; devolve a posição do próximo.
+local function drawHint(x, y, label, text, color)
+    love.graphics.setFont(fontSub)
+    local labelWidth = math.max(18, textWidth(fontSub, label) + 8)
+    love.graphics.setColor(color[1] * 0.35, color[2] * 0.35, color[3] * 0.35)
+    love.graphics.rectangle("fill", x, y, labelWidth, 18, 4, 4)
+    love.graphics.setColor(color[1], color[2], color[3])
+    love.graphics.printf(label, x, y + 3, labelWidth, "center")
+    love.graphics.setColor(0.52, 0.58, 0.68)
+    love.graphics.print(text, x + labelWidth + 6, y + 3)
+    return x + labelWidth + 6 + textWidth(fontSub, text) + 16
+end
+
+local HINT_A, HINT_B = {0.95, 0.85, 0.2}, {0.95, 0.35, 0.35}
+local HINT_X, HINT_Y = {0.3, 0.6, 1.0}, {0.2, 0.85, 0.45}
+local HINT_MENU = {0.75, 0.78, 0.85}
+
+local function drawStoreFooter()
+    love.graphics.setColor(0.04, 0.04, 0.07, 0.96)
+    love.graphics.rectangle("fill", 0, 422, 640, 58)
+    love.graphics.setColor(1, 1, 1, 0.06)
+    love.graphics.line(0, 422, 640, 422)
+    love.graphics.setColor(download.statusColor)
+    love.graphics.setFont(fontSmall)
+    love.graphics.print(ellipsize(fontSmall, download.statusText, 592), 24, 429)
+
+    local x = drawHint(24, 452, "A", "Abrir", HINT_A)
+    x = drawHint(x, 452, "Y", "Atualizar", HINT_Y)
+    local music = not bgm and "Música" or (isMusicPaused and "Música: off" or "Música: on")
+    x = drawHint(x, 452, "X", music, HINT_X)
+    drawHint(x, 452, "SEL", "Menu", HINT_MENU)
+end
+
+local function drawDetailsPage(game)
+    love.graphics.setColor(0.06, 0.07, 0.10)
+    love.graphics.rectangle("fill", 0, 0, 640, 480)
+
+    drawIcon(game, 24, 22, 84, fontIconBig)
+    love.graphics.setFont(fontBig)
+    love.graphics.setColor(0.96, 0.97, 1.0)
+    local titleLines = wrapLines(fontBig, game.name, 492, 2)
+    local titleHeight = lineHeight(fontBig, 26)
+    for index, line in ipairs(titleLines) do love.graphics.print(line, 124, 22 + (index - 1) * titleHeight) end
+    local metaY = 26 + #titleLines * titleHeight
+    love.graphics.setFont(fontSub)
+    love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3])
+    love.graphics.print(ellipsize(fontSub, porterName(game), 492), 124, metaY)
+    local status, statusColor = storeStatus(game)
+    local statusText = status == "OBTER" and "DISPONÍVEL" or status
+    drawChip(statusText, statusColor, 124, metaY + 22)
+
+    -- Botão principal: a ação de A muda conforme o estado do port.
+    local revoked = game.revocation ~= nil
+    local action
+    if game.installed and game.updateAvailable then
+        action = "Atualizar para v" .. tostring(game.version or "-")
+    elseif game.installed then
+        action = detailsSeed.paused and "Retomar semeação" or "Pausar semeação"
+    else
+        action = "Instalar  ·  " .. tostring(game.size or "")
+    end
+    local filled = not game.installed or game.updateAvailable
+    local buttonColor = game.updateAvailable and {0.95, 0.65, 0.2} or ACCENT
+    if filled then
+        love.graphics.setColor(buttonColor[1], buttonColor[2], buttonColor[3])
+        love.graphics.rectangle("fill", 24, 118, 592, 40, 10, 10)
+        love.graphics.setColor(0.02, 0.06, 0.10)
+    else
+        love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3])
+        love.graphics.setLineWidth(1.5)
+        love.graphics.rectangle("line", 24, 118, 592, 40, 10, 10)
+    end
+    love.graphics.setFont(fontItem)
+    love.graphics.printf("(A)  " .. action, 24, 118 + (40 - lineHeight(fontItem, 18)) / 2, 592, "center")
+
+    -- Faixa de informações, como numa página de loja.
+    local versionValue = game.installed and game.installedVersion and game.updateAvailable and
+        (tostring(game.installedVersion) .. " > " .. tostring(game.version)) or tostring(game.version or "-")
+    local stats = {{versionValue, "Versão"}, {game.size or "-", "Tamanho"},
+        {game.license or "-", "Licença"}, {sdLabels[currentSd]:match("^(%S+)"), "Destino"}}
+    for index, stat in ipairs(stats) do
+        local x = 24 + (index - 1) * 148
+        if index > 1 then
+            love.graphics.setColor(1, 1, 1, 0.08)
+            love.graphics.line(x, 176, x, 210)
+        end
+        love.graphics.setFont(fontItem)
+        love.graphics.setColor(0.92, 0.94, 0.98)
+        love.graphics.printf(ellipsize(fontItem, stat[1], 136), x + 6, 174, 136, "center")
+        love.graphics.setFont(fontTiny)
+        love.graphics.setColor(0.48, 0.55, 0.66)
+        love.graphics.printf(stat[2], x + 6, 198, 136, "center")
+    end
+
+    local sectionY = 226
+    if game.installed then
+        love.graphics.setColor(1, 1, 1, 0.04)
+        love.graphics.rectangle("fill", 24, 222, 592, 52, 8, 8)
+        love.graphics.setFont(fontSub)
+        local seedText = "Semeação: consultando..."
+        if not detailsSeed.loading then
+            if detailsSeed.error then seedText = "Semeação: " .. detailsSeed.error
+            elseif not detailsSeed.found then seedText = "Semeação: torrent fora do daemon"
+            elseif detailsSeed.seeding then seedText = "Semeação: ativa"
+            elseif detailsSeed.paused then seedText = "Semeação: pausada (bateria ou usuário)"
+            else seedText = "Semeação: " .. tostring(detailsSeed.phase or "inativa") end
+        end
+        local mapping = detailsSeed.portMapping or {}
+        local networkText
+        if mapping.active and mapping.addressScope == "cgnat" then
+            networkText = "Rede: CGNAT; somente conexões de saída"
+        elseif mapping.active then
+            networkText = "Rede: " .. tostring(mapping.method or "automática"):upper() ..
+                " na porta " .. tostring(mapping.port or 6881)
+        else
+            networkText = "Rede: sem abertura automática"
+        end
+        love.graphics.setColor(revoked and 1.0 or 0.82, revoked and 0.35 or 0.88, revoked and 0.35 or 0.95)
+        love.graphics.print(revoked and ellipsize(fontSub, "ALERTA DE SEGURANÇA: " ..
+            tostring(game.revocation.reason), 570) or seedText, 36, 230)
+        love.graphics.setColor(0.55, 0.62, 0.72)
+        local transfer = detailsSeed.found and string.format(
+            "Enviado %.1f MB  ·  ratio %.2f  ·  %.1f KB/s  ·  %d peer(s)  ·  ",
+            (detailsSeed.uploaded or 0) / 1048576, detailsSeed.ratio or 0,
+            (detailsSeed.uploadSpeed or 0) / 1024, detailsSeed.connections or 0) or ""
+        love.graphics.print(ellipsize(fontSub, transfer .. networkText, 570), 36, 252)
+        sectionY = 286
+    end
+
+    love.graphics.setFont(fontTitle)
+    love.graphics.setColor(0.96, 0.97, 1.0)
+    love.graphics.print("Sobre este port", 24, sectionY)
+    -- A área mostra linhas inteiras e a rolagem anda de linha em linha.
+    love.graphics.setFont(fontItem)
+    local textLine = lineHeight(fontItem, 19)
+    local textTop = sectionY + 28
+    local viewHeight = math.floor((414 - textTop) / textLine) * textLine
+    local description = tostring(game.description or "Sem descrição")
+    local lineCount = 1
+    if fontItem.getWrap then
+        local _, lines = fontItem:getWrap(description, 580)
+        lineCount = #lines
+    end
+    local contentHeight = lineCount * textLine
+    detailsScrollStep = textLine
+    detailsScrollMax = math.max(0, contentHeight - viewHeight)
+    detailsScroll = math.min(detailsScroll, detailsScrollMax)
+    scissor(24, textTop, 600, viewHeight)
+    love.graphics.setColor(0.72, 0.78, 0.86)
+    love.graphics.printf(description, 24, textTop - detailsScroll, 580, "left")
+    love.graphics.setScissor()
+    drawScrollbar(612, textTop, viewHeight, contentHeight, detailsScroll)
+
+    love.graphics.setColor(0.04, 0.04, 0.07, 0.96)
+    love.graphics.rectangle("fill", 0, 422, 640, 58)
+    love.graphics.setColor(1, 1, 1, 0.06)
+    love.graphics.line(0, 422, 640, 422)
+    love.graphics.setColor(download.statusColor)
+    love.graphics.setFont(fontSmall)
+    love.graphics.print(ellipsize(fontSmall, download.statusText, 592), 24, 429)
+    local x
+    if game.installed then
+        x = drawHint(24, 452, "A", game.updateAvailable and "Atualizar" or
+            (detailsSeed.paused and "Retomar" or "Pausar"), HINT_A)
+        x = drawHint(x, 452, "X", "Pausar todos", HINT_X)
+        x = drawHint(x, 452, "Y", "Retomar todos", HINT_Y)
+    else
+        x = drawHint(24, 452, "A", "Instalar", HINT_A)
+        x = drawHint(x, 452, "X", "Só P2P", HINT_X)
+    end
+    if detailsScrollMax > 0 then x = drawHint(x, 452, "D-PAD", "Rolar", HINT_MENU) end
+    drawHint(x, 452, "B", "Voltar", HINT_B)
 end
 
 function love.draw()
@@ -1582,7 +2072,7 @@ function love.draw()
         else
             local startY = 64
             local rowH = 68
-            local visibleRows = 6
+            local visibleRows = 5
 
             if uninstallerSelectedIdx * rowH - uninstallerScrollY > visibleRows * rowH then
                 uninstallerScrollY = (uninstallerSelectedIdx - visibleRows) * rowH
@@ -1593,7 +2083,7 @@ function love.draw()
             for i, port in ipairs(installedPorts) do
                 local y = startY + (i - 1) * rowH - uninstallerScrollY
                 
-                if y >= 60 and y <= 410 then
+                if y >= 60 and y <= 380 then
                     local isSel = (i == uninstallerSelectedIdx)
 
                     if isSel then
@@ -1678,117 +2168,9 @@ function love.draw()
 
     else
         -- ==============================================
-        -- TELA PRINCIPAL (CATALOGO EXPANDIDO)
+        -- TELA PRINCIPAL: LOJA DE PORTS
         -- ==============================================
-        love.graphics.setColor(0.0, 0.82, 1.0)
-        love.graphics.rectangle("fill", 24, 18, 46, 22, 4, 4)
-        love.graphics.setColor(1, 1, 1)
-        love.graphics.setFont(fontSub)
-        love.graphics.printf("KPM", 24, 23, 46, "center")
-
-        love.graphics.setFont(fontTitle)
-        love.graphics.setColor(0.96, 0.97, 1.0)
-        love.graphics.print("KDownloader PM", 78, 19)
-
-        love.graphics.setFont(fontSub)
-        love.graphics.setColor(0.45, 0.52, 0.62)
-        love.graphics.print("v" .. APP_VERSION, 220, 24)
-
-        love.graphics.setColor(0.35, 0.42, 0.52)
-        love.graphics.print("Destino: " .. sdLabels[currentSd], 300, 24)
-
-        if isOffline then
-            love.graphics.setColor(1.0, 0.3, 0.3, 0.15)
-            love.graphics.rectangle("fill", 430, 18, 186, 22, 11, 11)
-            love.graphics.setColor(1.0, 0.4, 0.4)
-        else
-            love.graphics.setColor(0.0, 0.82, 1.0, 0.15)
-            love.graphics.rectangle("fill", 430, 18, 186, 22, 11, 11)
-            love.graphics.setColor(0.0, 0.82, 1.0)
-        end
-        love.graphics.setFont(fontSub)
-        love.graphics.printf(syncStatus, 430, 23, 186, "center")
-
-        love.graphics.setColor(1, 1, 1, 0.06)
-        love.graphics.line(24, 52, 616, 52)
-
-        if #catalog == 0 then
-            love.graphics.setColor(0.45, 0.52, 0.62)
-            love.graphics.setFont(fontItem)
-            if #catalogAll > 0 then
-                love.graphics.printf("Nenhum resultado para: " .. searchQuery, 0, 190, 640, "center")
-            elseif syncStatus:find("(0 ports)", 1, true) then
-                love.graphics.printf("Nenhum homebrew no catálogo.", 0, 190, 640, "center")
-            elseif isOffline then
-                love.graphics.printf("Conexao ou leitura falhou.", 0, 190, 640, "center")
-                love.graphics.setFont(fontSub)
-                love.graphics.setColor(1.0, 0.4, 0.4)
-                love.graphics.printf("Aperte (X) para tentar de novo", 0, 220, 640, "center")
-            else
-                love.graphics.printf("Aguardando lista de ports...", 0, 190, 640, "center")
-            end
-        else
-            local startY = 64
-            local rowH = 68
-            local visibleRows = 6
-
-            if selectedIdx * rowH - scrollY > visibleRows * rowH then
-                scrollY = (selectedIdx - visibleRows) * rowH
-            elseif selectedIdx * rowH - scrollY < rowH then
-                scrollY = (selectedIdx - 1) * rowH
-            end
-
-            for i, game in ipairs(catalog) do
-                local y = startY + (i - 1) * rowH - scrollY
-                
-                if y >= 60 and y <= 410 then
-                    local isSel = (i == selectedIdx)
-
-                    if isSel then
-                        love.graphics.setColor(0.0, 0.82, 1.0, 0.12)
-                        love.graphics.rectangle("fill", 24, y, 592, 58, 8, 8)
-                        love.graphics.setColor(0.0, 0.82, 1.0, 0.85)
-                        love.graphics.setLineWidth(1.5)
-                        love.graphics.rectangle("line", 24, y, 592, 58, 8, 8)
-                        love.graphics.setColor(0.0, 0.82, 1.0)
-                        love.graphics.rectangle("fill", 24, y + 11, 4, 36, 2, 2)
-                    else
-                        love.graphics.setColor(1, 1, 1, 0.02)
-                        love.graphics.rectangle("fill", 24, y, 592, 58, 8, 8)
-                    end
-
-                    love.graphics.setColor(0.92, 0.94, 0.98)
-                    love.graphics.setFont(fontItem)
-                    love.graphics.print(game.name, 44, y + 10)
-
-                    love.graphics.setColor(0.40, 0.46, 0.56)
-                    love.graphics.setFont(fontSub)
-                    love.graphics.print(game.filename, 44, y + 33)
-
-                    love.graphics.setFont(fontSmall)
-                    love.graphics.setColor(0.55, 0.62, 0.72)
-                    love.graphics.printf(game.size or "Port", 430, y + 12, 170, "right")
-
-                    if game.installed then
-                        local hasUpdate = game.updateAvailable
-                        love.graphics.setColor(hasUpdate and 0.95 or 0.2,
-                            hasUpdate and 0.65 or 0.85, hasUpdate and 0.2 or 0.45, 0.15)
-                        love.graphics.rectangle("fill", 520, y + 25, 80, 18, 4, 4)
-                        love.graphics.setColor(hasUpdate and 0.95 or 0.2,
-                            hasUpdate and 0.65 or 0.85, hasUpdate and 0.2 or 0.45)
-                        love.graphics.setFont(fontSub)
-                        love.graphics.printf(hasUpdate and "ATUALIZAR" or "INSTALADO",
-                            520, y + 28, 80, "center")
-                    else
-                        love.graphics.setColor(1, 1, 1, 0.05)
-                        love.graphics.rectangle("fill", 540, y + 25, 60, 18, 4, 4)
-                        love.graphics.setColor(0.45, 0.52, 0.62)
-                        love.graphics.setFont(fontSub)
-                        love.graphics.printf("NUVEM", 540, y + 28, 60, "center")
-                    end
-                end
-            end
-        end
+        drawStore()
 
         -- ============================================================
         -- POPUP DE DOWNLOAD COM PORCENTAGEM E VELOCIDADE
@@ -1809,7 +2191,7 @@ function love.draw()
                 love.graphics.printf(download.updateMode and "BAIXANDO ATUALIZAÇÃO..." or
                     "BAIXANDO PORT...", 120, 170, 400, "center")
             elseif download.phase == "p2p" then
-                love.graphics.printf("PREPARANDO TESTE P2P...", 120, 170, 400, "center")
+                love.graphics.printf("PREPARANDO DOWNLOAD SÓ P2P...", 120, 170, 400, "center")
             elseif download.phase == "cache" then
                 love.graphics.printf("REUTILIZANDO DOWNLOAD...", 120, 170, 400, "center")
             elseif download.phase == "conectando" then
@@ -1876,55 +2258,7 @@ function love.draw()
             love.graphics.printf(infoText, 120, 280, 400, "center")
         end
 
-        -- ============================================================
-        -- RODAPÉ DA TELA PRINCIPAL (SEM D-PAD, NOMES INTEIROS, Y VERDE)
-        -- ============================================================
-        love.graphics.setColor(0.04, 0.04, 0.07, 0.95)
-        love.graphics.rectangle("fill", 0, 422, 640, 58)
-        love.graphics.setColor(1, 1, 1, 0.06)
-        love.graphics.line(0, 422, 640, 422)
-
-        -- Texto de status sincronizado posicionado acima na barra
-        love.graphics.setColor(download.statusColor)
-        love.graphics.setFont(fontSmall)
-        love.graphics.print(download.statusText, 24, 429)
-
-        love.graphics.setFont(fontSub)
-        love.graphics.setColor(0.40, 0.46, 0.56)
-        
-        -- DETALHES (A)
-        love.graphics.setColor(0.35, 0.3, 0.1)
-        love.graphics.rectangle("fill", 24, 452, 18, 18, 4, 4)
-        love.graphics.setColor(0.95, 0.85, 0.2)
-        love.graphics.printf("A", 24, 455, 18, "center")
-        love.graphics.setColor(0.40, 0.46, 0.56)
-        love.graphics.print("Detalhes", 47, 455)
-
-        -- ATUALIZAR LISTA (Y - Verde clássico do console)
-        love.graphics.setColor(0.15, 0.35, 0.2)
-        love.graphics.rectangle("fill", 125, 452, 18, 18, 4, 4)
-        love.graphics.setColor(0.2, 0.85, 0.45)
-        love.graphics.printf("Y", 125, 455, 18, "center")
-        love.graphics.setColor(0.40, 0.46, 0.56)
-        love.graphics.print("Atualizar", 148, 455)
-
-        -- MUSICA (X)
-        love.graphics.setColor(0.15, 0.25, 0.4)
-        love.graphics.rectangle("fill", 235, 452, 18, 18, 4, 4)
-        love.graphics.setColor(0.3, 0.6, 1.0)
-        love.graphics.printf("X", 235, 455, 18, "center")
-        love.graphics.setColor(0.40, 0.46, 0.56)
-        local musText = isMusicPaused and "Musica: Off" or "Musica: On"
-        if not bgm then musText = "Musica" end
-        love.graphics.print(musText, 258, 455)
-
-        -- MENU (SELECT)
-        love.graphics.setColor(0.35, 0.15, 0.15)
-        love.graphics.rectangle("fill", 365, 452, 32, 18, 4, 4)
-        love.graphics.setColor(0.9, 0.2, 0.2)
-        love.graphics.printf("SEL", 365, 455, 32, "center")
-        love.graphics.setColor(0.40, 0.46, 0.56)
-        love.graphics.print("Menu", 403, 455)
+        drawStoreFooter()
 
         if showMenu then
             love.graphics.setColor(0, 0, 0, 0.85)
@@ -2060,75 +2394,7 @@ function love.draw()
             love.graphics.printf("A: letra   Y: apagar   B: voltar", 105, 410, 430, "center")
         end
 
-        if showDetails and catalog[selectedIdx] then
-            local game = catalog[selectedIdx]
-            love.graphics.setColor(0, 0, 0, 0.88)
-            love.graphics.rectangle("fill", 0, 0, 640, 480)
-            love.graphics.setColor(0.1, 0.15, 0.22)
-            love.graphics.rectangle("fill", 70, 65, 500, 350, 12, 12)
-            love.graphics.setColor(0.0, 0.82, 1.0)
-            love.graphics.setFont(fontTitle)
-            love.graphics.printf(game.name, 90, 85, 460, "center")
-            love.graphics.setColor(0.85, 0.9, 0.95)
-            love.graphics.setFont(fontSub)
-            local versionText = game.installed and
-                ("Instalada: " .. tostring(game.installedVersion or "-") ..
-                 "   |   Disponível: " .. tostring(game.version or "-")) or
-                ("Versão: " .. tostring(game.version or "-"))
-            love.graphics.printf(versionText .. "   |   Licença: " .. (game.license or "-") ..
-                "   |   Tamanho: " .. (game.size or "-"), 90, 125, 460, "center")
-            love.graphics.setFont(fontItem)
-            love.graphics.printf(game.description or "Sem descrição", 95, 160, 450, "center")
-            love.graphics.setFont(fontSub)
-            love.graphics.setColor(0.5, 0.6, 0.7)
-            love.graphics.printf("Destino: " .. sdLabels[currentSd], 90, 245, 460, "center")
-            if game.installed then
-                local revoked = game.revocation ~= nil
-                love.graphics.setColor(revoked and 1.0 or (game.updateAvailable and 0.95 or 0.2),
-                    revoked and 0.3 or (game.updateAvailable and 0.65 or 0.85),
-                    revoked and 0.3 or (game.updateAvailable and 0.2 or 0.45))
-                love.graphics.printf(revoked and "ALERTA DE SEGURANÇA: " ..
-                    tostring(game.revocation.reason):sub(1, 48) or
-                    (game.updateAvailable and "ATUALIZAÇÃO DISPONÍVEL" or "INSTALADO"),
-                    90, 270, 460, "center")
-                love.graphics.setColor(0.68, 0.76, 0.86)
-                local seedText = "Semeacao: consultando..."
-                if not detailsSeed.loading then
-                    if detailsSeed.error then seedText = "Semeacao: " .. detailsSeed.error
-                    elseif not detailsSeed.found then seedText = "Semeacao: torrent fora do daemon"
-                    elseif detailsSeed.seeding then seedText = "Semeacao: ativa"
-                    elseif detailsSeed.paused then seedText = "Semeacao: pausada (bateria ou usuario)"
-                    else seedText = "Semeacao: " .. tostring(detailsSeed.phase or "inativa") end
-                end
-                love.graphics.printf(seedText, 90, 298, 460, "center")
-                if detailsSeed.found then
-                    love.graphics.printf(string.format(
-                        "Enviado: %.1f MB  |  Ratio: %.2f  |  Upload: %.1f KB/s  |  Peers: %d",
-                        (detailsSeed.uploaded or 0) / 1048576, detailsSeed.ratio or 0,
-                        (detailsSeed.uploadSpeed or 0) / 1024, detailsSeed.connections or 0),
-                        85, 324, 470, "center")
-                end
-                love.graphics.setColor(0.5, 0.6, 0.7)
-                local oneAction = game.updateAvailable and "A: atualizar" or
-                    (detailsSeed.paused and "A: retomar este" or "A: pausar este")
-                love.graphics.printf(oneAction .. "   X: pausar todos   Y: retomar todos",
-                    75, 355, 490, "center")
-                local mapping = detailsSeed.portMapping or {}
-                local networkText
-                if mapping.active and mapping.addressScope == "cgnat" then
-                    networkText = "Rede: CGNAT; somente conexoes de saida"
-                elseif mapping.active then
-                    networkText = "Rede: " .. tostring(mapping.method or "automatica"):upper() ..
-                        " ativo na porta " .. tostring(mapping.port or 6881)
-                else
-                    networkText = "Rede: sem abertura automatica"
-                end
-                love.graphics.printf(networkText .. "   |   B: voltar", 80, 382, 480, "center")
-            else
-                love.graphics.printf("A: instalar/cache   X: teste P2P sem HTTPS   B: voltar",
-                    70, 380, 500, "center")
-            end
-        end
+        if showDetails and catalog[selectedIdx] then drawDetailsPage(catalog[selectedIdx]) end
 
         if appState == "catalog_trust" then
             love.graphics.setColor(0, 0, 0, 0.9)

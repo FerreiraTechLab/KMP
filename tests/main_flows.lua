@@ -186,4 +186,73 @@ love.gamepadpressed(nil, "dpdown")
 love.gamepadpressed(nil, "a")
 assert(event("shutdown"))
 
+-- A loja navega em grade de três colunas e para nas bordas.
+api.reset()
+local shelf = {}
+for index = 1, 8 do
+    shelf[index] = game({id = "port" .. index, name = "Port " .. index,
+        install = {portId = "port" .. index, paths = {"port" .. index .. ".sh"}},
+        installed = index <= 2, updateAvailable = index == 2})
+end
+api.setCatalog(shelf)
+love.gamepadpressed(nil, "dpdown")
+assert(api.snapshot().selectedIdx == 4, "baixo pula uma linha")
+love.gamepadpressed(nil, "dpright")
+assert(api.snapshot().selectedIdx == 5)
+love.gamepadpressed(nil, "dpdown")
+assert(api.snapshot().selectedIdx == 8, "a última linha incompleta recebe a seleção")
+love.gamepadpressed(nil, "dpdown")
+assert(api.snapshot().selectedIdx == 8, "baixo para na última linha")
+love.gamepadpressed(nil, "dpup")
+love.gamepadpressed(nil, "dpup")
+love.gamepadpressed(nil, "dpup")
+assert(api.snapshot().selectedIdx == 2, "cima para na primeira linha")
+love.gamepadreleased(nil, "dpup")
+
+-- Segurar o direcional repete o movimento; soltar interrompe.
+api.reset()
+api.setCatalog(shelf)
+love.gamepadpressed(nil, "dpright")
+love.update(0.2)
+assert(api.snapshot().selectedIdx == 2, "sem repetição antes do atraso")
+love.update(0.2)
+assert(api.snapshot().selectedIdx >= 3, "segurar repete o movimento")
+love.gamepadreleased(nil, "dpright")
+local stopped = api.snapshot().selectedIdx
+love.update(0.5)
+assert(api.snapshot().selectedIdx == stopped, "soltar interrompe a repetição")
+
+-- O analógico só move ao cruzar o limite, não a cada evento do eixo.
+api.reset()
+api.setCatalog(shelf)
+love.gamepadaxis(nil, "leftx", 0.7)
+love.gamepadaxis(nil, "leftx", 0.8)
+love.gamepadaxis(nil, "leftx", 0.9)
+assert(api.snapshot().selectedIdx == 2, "eixo segurado move uma vez")
+love.gamepadaxis(nil, "leftx", 0.1)
+love.gamepadaxis(nil, "leftx", 0.9)
+assert(api.snapshot().selectedIdx == 3)
+love.gamepadaxis(nil, "leftx", 0)
+love.gamepadaxis(nil, "lefty", 0.9)
+assert(api.snapshot().selectedIdx == 6)
+love.gamepadaxis(nil, "lefty", 0)
+
+-- L1/R1 alternam as abas Início, Instalados e Atualizações.
+api.reset()
+api.setCatalog(shelf)
+love.gamepadpressed(nil, "rightshoulder")
+assert(api.snapshot().storeTab == 2 and api.snapshot().visiblePorts == 2)
+love.gamepadpressed(nil, "rightshoulder")
+assert(api.snapshot().storeTab == 3 and api.snapshot().visiblePorts == 1)
+love.gamepadpressed(nil, "a")
+assert(api.snapshot().showDetails, "A abre o port da aba de atualizações")
+love.draw()
+love.gamepadpressed(nil, "dpdown")
+love.gamepadpressed(nil, "b")
+love.gamepadpressed(nil, "rightshoulder")
+assert(api.snapshot().storeTab == 1 and api.snapshot().visiblePorts == 8)
+love.gamepadpressed(nil, "leftshoulder")
+assert(api.snapshot().storeTab == 3)
+love.draw()
+
 print("main interface flows: ok")
