@@ -59,6 +59,35 @@ class SelfUpdateTest(unittest.TestCase):
         self.assertEqual((self.base / "KMP/peer.txt").read_text(), "192.168.0.1:6881")
         self.assertFalse(pending.exists())
 
+    def test_preserved_data_is_moved_not_copied(self):
+        packages = self.base / "KMP/conf/community/packages"
+        packages.mkdir(parents=True)
+        (packages / "big.zip").write_bytes(b"x" * 4096)
+        inode = (packages / "big.zip").stat().st_ino
+        self.prepare()
+        MODULE.apply(self.base)
+        self.assertEqual((self.base / "KMP/conf/community/packages/big.zip").stat().st_ino, inode)
+
+    def test_prepare_uses_updater_from_verified_package(self):
+        self.prepare()
+        self.assertEqual((self.base / ".kmp/client-updater.py").read_text(), "# updater")
+
+    def test_command_line_apply_records_result(self):
+        import contextlib, io, sys
+        result = self.base / ".kmp/client-update/result.json"
+        self.prepare()
+        argv = sys.argv
+        try:
+            sys.argv = ["self_update.py", "apply", str(self.base)]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(MODULE.main(), 0)
+            self.assertEqual(json.loads(result.read_text()), {"schemaVersion": 1, "ok": True, "version": "2.0"})
+            with self.assertRaises(FileNotFoundError):
+                MODULE.main()
+            self.assertFalse(json.loads(result.read_text())["ok"])
+        finally:
+            sys.argv = argv
+
     def test_rejects_wrong_hash_and_version(self):
         self.item["packageSha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "SHA-256"):

@@ -17,6 +17,7 @@ import zipfile
 STATE_DIR = Path(".kmp/client-update")
 PENDING = "pending.json"
 JOURNAL = "journal.json"
+RESULT = "result.json"
 EXTERNAL_UPDATER = Path(".kmp/client-updater.py")
 PRESERVED = ("conf", "diagnostics", "peer.txt", "catalog-url.txt")
 MAX_FILES = 20_000
@@ -170,7 +171,11 @@ def prepare(package: Path, base: Path, item: dict, updater_source: Path | None =
                 if target.is_file():
                     os.chmod(target, mode)
         fsync_tree(stage)
-        updater = updater_source or Path(__file__).resolve()
+        # O pacote já foi conferido pelo SHA-256 do catálogo assinado; usar o atualizador
+        # dele faz uma correção na aplicação valer já nesta atualização.
+        updater = stage / "KMP/self_update.py"
+        if not updater.is_file():
+            updater = updater_source or Path(__file__).resolve()
         copy_external_updater(base, updater)
         pending = {"schemaVersion": 1, "version": item["version"], "stage": stage.name,
                    "packageSha256": item["packageSha256"]}
@@ -191,9 +196,31 @@ def valid_state_record(value: dict, name: str) -> tuple[str, str]:
     return version, stage
 
 
+def move_preserved(source_root: Path, target_root: Path) -> None:
+    # Os dados do usuário são movidos, não copiados: conf/ guarda os pacotes do nó
+    # comunitário, que podem passar de 1 GiB e não caberiam duas vezes no cartão.
+    for relative in PRESERVED:
+        source = source_root / relative
+        target = target_root / relative
+        if not (source.exists() or source.is_symlink()):
+            continue
+        if target.exists() or target.is_symlink():
+            remove_path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(source, target)
+
+
 def restore_backup(base: Path, state: Path, journal: dict) -> None:
     backup = state / journal["backup"]
     if (backup / "KMP").exists():
+        if (base / "KMP").is_dir():
+            # Devolve ao backup o que já tinha sido movido para a versão nova.
+            for relative in PRESERVED:
+                moved = base / "KMP" / relative
+                original = backup / "KMP" / relative
+                if (moved.exists() or moved.is_symlink()) and not (original.exists() or original.is_symlink()):
+                    original.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(moved, original)
         remove_path(base / "KMP")
         os.replace(backup / "KMP", base / "KMP")
     backup_script = backup / "KMP.sh"
@@ -254,18 +281,8 @@ def apply(base: Path, checkpoint=None) -> str:
         durable_json(state / JOURNAL, journal)
         if checkpoint: checkpoint("backed_up")
         os.replace(stage / "KMP", base / "KMP")
-        for relative in PRESERVED:
-            source = backup / "KMP" / relative
-            target = base / "KMP" / relative
-            if source.exists() or source.is_symlink():
-                if target.exists() or target.is_symlink():
-                    remove_path(target)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if source.is_dir() and not source.is_symlink():
-                    shutil.copytree(source, target, symlinks=True)
-                else:
-                    shutil.copy2(source, target, follow_symlinks=False)
-        fsync_tree(base / "KMP")
+        move_preserved(backup / "KMP", base / "KMP")
+        fsync_directory(base / "KMP")
         journal["state"] = "replaced"
         durable_json(state / JOURNAL, journal)
         if checkpoint: checkpoint("replaced")
@@ -287,12 +304,28 @@ def apply(base: Path, checkpoint=None) -> str:
         raise
 
 
+def write_result(base: Path, value: dict) -> None:
+    try:
+        durable_json(base / STATE_DIR / RESULT, {"schemaVersion": 1, **value})
+    except OSError:
+        pass
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "recover":
         print(recover(Path(sys.argv[2])))
         return 0
     if len(sys.argv) == 3 and sys.argv[1] == "apply":
-        print(apply(Path(sys.argv[2])))
+        # O KMP.sh aplica depois que a interface fecha; o resultado fica registrado
+        # para o Client mostrar na próxima abertura.
+        base = Path(sys.argv[2]).resolve()
+        try:
+            version = apply(base)
+        except Exception as exc:
+            write_result(base, {"ok": False, "error": str(exc)[:300]})
+            raise
+        write_result(base, {"ok": True, "version": version})
+        print(version)
         return 0
     if len(sys.argv) == 6 and sys.argv[1] == "prepare":
         item = json.loads(Path(sys.argv[4]).read_text(encoding="utf-8"))

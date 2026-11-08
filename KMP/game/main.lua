@@ -137,6 +137,7 @@ local catalog = {}
 local catalogAll = {}
 local catalogRevocations = {}
 local clientUpdate = nil
+local clientUpdateNotice = nil
 local incompatiblePorts = 0
 local selectedIdx = 1
 local fontTitle, fontItem, fontSub, fontSmall, fontTiny, fontBig, fontIcon, fontIconBig
@@ -515,7 +516,32 @@ function finishSync(event)
     end
     download.statusText = fromCache and "Usando catálogo salvo." or "Lista sincronizada com sucesso!"
     download.statusColor = {0.2, 0.85, 0.45}
+    if clientUpdateNotice then
+        download.statusText, download.statusColor = clientUpdateNotice.text, clientUpdateNotice.color
+        clientUpdateNotice = nil
+    end
     isOffline = fromCache
+end
+
+-- O KMP.sh aplica a atualização depois que a interface fecha; sem este aviso, uma
+-- falha (com volta à versão anterior) só aparecia no log.
+local function readClientUpdateResult()
+    if CLIENT_BASE == "" then return end
+    local path = CLIENT_BASE .. "/.kmp/client-update/result.json"
+    local handle = io.open(path, "r")
+    if not handle then return end
+    local result = Json.decode(handle:read("*a") or "")
+    handle:close()
+    os.remove(path)
+    if type(result) ~= "table" then return end
+    if result.ok then
+        clientUpdateNotice = {text = "KMP atualizado para v" .. tostring(result.version or APP_VERSION) .. ".",
+            color = {0.2, 0.85, 0.45}}
+    else
+        clientUpdateNotice = {text = ("Atualização do KMP falhou; versão anterior mantida: " ..
+            tostring(result.error or "erro desconhecido")):sub(1, 140), color = {1.0, 0.3, 0.3}}
+    end
+    download.statusText, download.statusColor = clientUpdateNotice.text, clientUpdateNotice.color
 end
 
 function love.load()
@@ -555,6 +581,7 @@ function love.load()
 
     communityEnabled = readCommunitySetting()
     startSync()
+    readClientUpdateResult()
 end
 
 function love.update(dt)
@@ -761,6 +788,9 @@ local function startTorrentDownload(game, peerOnly, updateMode)
         return
     end
     local basePorts = sdPaths[currentSd]
+    -- A atualização do Client fica onde o KMP.sh a procura, não no cartão de destino
+    -- dos ports; com cartões diferentes ela era preparada e nunca aplicada.
+    if game.isClientUpdate and CLIENT_BASE ~= "" then basePorts = CLIENT_BASE end
     local directory = basePorts .. "/.kmp/torrents/" .. game.id
     if game.isClientUpdate then
         directory = basePorts .. "/.kmp/client-downloads/" .. game.infoHash:lower()
