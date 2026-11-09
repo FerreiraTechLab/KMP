@@ -1942,19 +1942,29 @@ local function drawDetailsPage(game)
     else
         action = "Instalar  ·  " .. tostring(game.size or "")
     end
+    -- Antes da instalação, o download só P2P (X) fica ao lado do botão principal; no
+    -- rodapé ele passava despercebido.
+    local mainWidth = game.installed and 592 or 420
     local filled = not game.installed or game.updateAvailable
     local buttonColor = game.updateAvailable and {0.95, 0.65, 0.2} or ACCENT
     if filled then
         love.graphics.setColor(buttonColor[1], buttonColor[2], buttonColor[3])
-        love.graphics.rectangle("fill", 24, 118, 592, 40, 10, 10)
+        love.graphics.rectangle("fill", 24, 118, mainWidth, 40, 10, 10)
         love.graphics.setColor(0.02, 0.06, 0.10)
     else
         love.graphics.setColor(ACCENT[1], ACCENT[2], ACCENT[3])
         love.graphics.setLineWidth(1.5)
-        love.graphics.rectangle("line", 24, 118, 592, 40, 10, 10)
+        love.graphics.rectangle("line", 24, 118, mainWidth, 40, 10, 10)
     end
     love.graphics.setFont(fontItem)
-    love.graphics.printf("(A)  " .. action, 24, 118 + (40 - lineHeight(fontItem, 18)) / 2, 592, "center")
+    local buttonTextY = 118 + (40 - lineHeight(fontItem, 18)) / 2
+    love.graphics.printf("(A)  " .. action, 24, buttonTextY, mainWidth, "center")
+    if not game.installed then
+        love.graphics.setColor(HINT_X[1], HINT_X[2], HINT_X[3])
+        love.graphics.setLineWidth(1.5)
+        love.graphics.rectangle("line", 456, 118, 160, 40, 10, 10)
+        love.graphics.printf("(X)  Só P2P", 456, buttonTextY, 160, "center")
+    end
 
     -- Faixa de informações, como numa página de loja.
     local versionValue = game.installed and game.installedVersion and game.updateAvailable and
@@ -2049,7 +2059,6 @@ local function drawDetailsPage(game)
         x = drawHint(x, 452, "Y", "Retomar todos", HINT_Y)
     else
         x = drawHint(24, 452, "A", "Instalar", HINT_A)
-        x = drawHint(x, 452, "X", "Só P2P", HINT_X)
     end
     if detailsScrollMax > 0 then x = drawHint(x, 452, "D-PAD", "Rolar", HINT_MENU) end
     drawHint(x, 452, "B", "Voltar", HINT_B)

@@ -28,6 +28,9 @@ function Rpc.new(endpoint, secret, runner)
             " " .. shellQuote(endpoint) .. " 2>/dev/null"
         local body, err = runner(command)
         if not body then return nil, err end
+        -- No LuaJIT, close() do popen não devolve o código do curl: uma falha de conexão
+        -- ou o tempo esgotado chegam aqui como corpo vazio.
+        if not body:match("%S") then return nil, "kmp-torrentd não respondeu em 5 s (parado ou ocupado)" end
         local decoded, decodeError = Json.decode(body)
         if not decoded then return nil, "resposta RPC inválida: " .. tostring(decodeError) end
         if decoded.error then return nil, tostring(decoded.error.message or "erro no aria2c") end
