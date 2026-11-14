@@ -128,4 +128,29 @@ local forgetBackend = Torrent.new(function(method, params)
 end)
 assert(forgetBackend:forget(hash))
 assert(forgottenGid == "face1234")
+-- Itens com torrent embutido recebem os nós públicos por kmp.addPeers, inclusive ao
+-- reaproveitar um torrent existente; sem nós, o método não é chamado.
+local peerCalls = {}
+local seeded = Torrent.new(function(method, params)
+    peerCalls[#peerCalls + 1] = {method = method, params = params}
+    if method == "aria2.tellActive" or method == "aria2.tellWaiting" or method == "aria2.tellStopped" then return {} end
+    if method == "aria2.addTorrent" then return "seed1234" end
+    if method == "kmp.addPeers" then return #params[2] end
+    error("RPC inesperado: " .. method)
+end)
+assert(seeded:start({magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash, torrent = "ZDQ6aW5mb2Rl",
+    seedNodes = {"163.176.18.211:6881", "inválido"}}, "/tmp/kmp") == "seed1234")
+local last = peerCalls[#peerCalls]
+assert(last.method == "kmp.addPeers" and last.params[1] == "seed1234")
+assert(#last.params[2] == 1 and last.params[2][1] == "163.176.18.211:6881")
+local before = #peerCalls
+assert(seeded:addPeers("seed1234", {seedNodes = {}}) == 0 and #peerCalls == before)
+local noPeerMethod = Torrent.new(function(method)
+    if method == "aria2.tellActive" or method == "aria2.tellWaiting" or method == "aria2.tellStopped" then return {} end
+    if method == "aria2.addTorrent" then return "aria1234" end
+    return nil, "método desconhecido"
+end)
+assert(noPeerMethod:start({magnet = "magnet:?xt=urn:btih:" .. hash, infoHash = hash, torrent = "ZDQ6aW5mb2Rl",
+    seedNodes = {"163.176.18.211:6881"}}, "/tmp/kmp") == "aria1234", "aria2 sem kmp.addPeers continua funcionando")
+
 print("torrent tests: ok")

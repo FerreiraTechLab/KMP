@@ -17,20 +17,23 @@ function Rpc.new(endpoint, secret, runner)
         return body
     end
     return function(method, params)
-        if type(method) ~= "string" or not method:match("^aria2%.[%a]+$") then
+        if type(method) ~= "string" or
+           not (method:match("^aria2%.[%a]+$") or method:match("^kmp%.[%a]+$")) then
             return nil, "método RPC inválido"
         end
         local arguments = {"token:" .. secret}
         for _, parameter in ipairs(params or {}) do arguments[#arguments + 1] = parameter end
         local request = Json.encode({jsonrpc = "2.0", id = "kmp", method = method, params = arguments})
-        local command = "curl --noproxy '*' --connect-timeout 2 --max-time 5 --silent --show-error " ..
+        -- Num console com o cartão ocupado, uma resposta legítima chegou a levar 2,7 s; 15 s
+        -- separam o daemon ocupado do daemon parado.
+        local command = "curl --noproxy '*' --connect-timeout 2 --max-time 15 --silent --show-error " ..
             "--header 'Content-Type: application/json' --data-binary " .. shellQuote(request) ..
             " " .. shellQuote(endpoint) .. " 2>/dev/null"
         local body, err = runner(command)
         if not body then return nil, err end
         -- No LuaJIT, close() do popen não devolve o código do curl: uma falha de conexão
         -- ou o tempo esgotado chegam aqui como corpo vazio.
-        if not body:match("%S") then return nil, "kmp-torrentd não respondeu em 5 s (parado ou ocupado)" end
+        if not body:match("%S") then return nil, "kmp-torrentd não respondeu em 15 s (parado ou ocupado)" end
         local decoded, decodeError = Json.decode(body)
         if not decoded then return nil, "resposta RPC inválida: " .. tostring(decodeError) end
         if decoded.error then return nil, tostring(decoded.error.message or "erro no aria2c") end

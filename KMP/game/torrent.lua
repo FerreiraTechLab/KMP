@@ -88,7 +88,30 @@ function Torrent:forget(expectedHash)
     return true
 end
 
+local function seedNodes(item)
+    local nodes = {}
+    for _, node in ipairs(type(item.seedNodes) == "table" and item.seedNodes or {}) do
+        if type(node) == "string" and node:match("^%d+%.%d+%.%d+%.%d+:%d+$") then nodes[#nodes + 1] = node end
+    end
+    return nodes
+end
+
+-- Os itens do catálogo v3 entram por addTorrent, que ignora os x.pe do magnet; os nós
+-- públicos chegam ao torrent por kmp.addPeers. O backend aria2 não tem esse método, e a
+-- falha é ignorada: lá os nós continuam vindo pelo magnet.
+function Torrent:addPeers(gid, item)
+    local nodes = seedNodes(item)
+    if #nodes == 0 or type(gid) ~= "string" then return 0 end
+    return self.rpc("kmp.addPeers", {gid, nodes}) or 0
+end
+
 function Torrent:start(item, directory)
+    local gid, err, reused = self:launch(item, directory)
+    if gid then self:addPeers(gid, item) end
+    return gid, err, reused
+end
+
+function Torrent:launch(item, directory)
     if type(item) ~= "table" or type(item.magnet) ~= "string" or
        type(directory) ~= "string" or directory == "" then
         return nil, "pacote ou destino inválido"
@@ -108,10 +131,8 @@ function Torrent:start(item, directory)
     end
     -- Nós públicos do catálogo assinado: um peer sempre alcançável e uma ponte de
     -- hole punching, mesmo antes de trackers e DHT responderem.
-    for _, node in ipairs(type(item.seedNodes) == "table" and item.seedNodes or {}) do
-        if type(node) == "string" and node:match("^%d+%.%d+%.%d+%.%d+:%d+$") then
-            magnet = magnet .. "&x.pe=" .. node
-        end
+    for _, node in ipairs(seedNodes(item)) do
+        magnet = magnet .. "&x.pe=" .. node
     end
     local options = {
         dir = directory,

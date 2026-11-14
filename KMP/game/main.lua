@@ -854,7 +854,12 @@ local function startTorrentDownload(game, peerOnly, updateMode)
         local lastProgress = 0
         local lastActivity = love.timer.getTime()
         local lastState = nil
+        local lastPeers = love.timer.getTime()
         while true do
+            if love.timer.getTime() - lastPeers >= 60 then
+                backend:addPeers(gid, game)
+                lastPeers = love.timer.getTime()
+            end
             if cancel:pop() then
                 backend:stop(gid)
                 fail("download interrompido; os dados podem ser retomados")
