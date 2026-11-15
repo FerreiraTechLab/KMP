@@ -24,7 +24,7 @@ python_binary=${KMP_PYTHON:-}
 if [ -z "$python_binary" ]; then
   python_binary=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
 fi
-daemon_version=12
+daemon_version=13
 
 backend_identity() {
   resolved=$aria2_binary
@@ -174,12 +174,19 @@ case "$command_name" in
     if [ -f "$log_file" ] && [ "$(wc -c < "$log_file")" -gt 1048576 ]; then
       mv "$log_file" "$log_file.old"
     fi
+    # Em consoles de até 1,5 GB de RAM, o heap do daemon divide espaço com a interface.
+    memory_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null)
+    memory_limit=$(read_setting memory_limit_mb "")
+    if [ -z "$memory_limit" ]; then
+      case "$memory_kb" in ''|*[!0-9]*) memory_limit=0 ;; *) [ "$memory_kb" -le 1572864 ] && memory_limit=192 || memory_limit=0 ;; esac
+    fi
+    case "$memory_limit" in ''|*[!0-9]*) memory_limit=0 ;; esac
     if is_kmp_torrentd; then
       setsid "$aria2_binary" \
         --rpc-listen="127.0.0.1:${rpc_port}" --rpc-secret="$rpc_secret" \
         --state-dir="$state_dir/torrentd" --data-dir="$download_dir" \
         --listen-port="$listen_port" --upload-limit="$upload_limit" \
-        --download-limit="$download_limit" \
+        --download-limit="$download_limit" --memory-limit="$memory_limit" \
         < /dev/null >> "$log_file" 2>&1 &
     else
       setsid "$aria2_binary" \

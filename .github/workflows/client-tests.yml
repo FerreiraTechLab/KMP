@@ -21,6 +21,7 @@ jobs:
       - run: lua tests/main_smoke.lua
       - run: lua tests/main_controls.lua
       - run: KMP_TEST_MODE=1 lua tests/main_flows.lua
+      - run: KMP_TEST_MODE=1 lua tests/main_throttle.lua
       - run: python3 tests/self_update.py
       - run: python3 tests/port_mapper.py
       - run: python3 tests/seed_node.py

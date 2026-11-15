@@ -47,6 +47,10 @@ local detailsScrollStep = 19
 local heldInput = nil
 local axisDirection = {leftx = 0, lefty = 0}
 local updateHeldInput
+-- Redesenhar a 60 quadros por segundo com a tela parada consumia mais de um terço da CPU
+-- de um console; o Client cai para 8 quadros quando ninguém mexe nele.
+local lastInputAt, lastFrameAt = 0, 0
+local ACTIVE_FRAME, IDLE_FRAME, IDLE_AFTER = 1 / 30, 1 / 8, 3
 
 local scale = 1
 local offsetX = 0
@@ -584,7 +588,18 @@ function love.load()
     readClientUpdateResult()
 end
 
+local function throttleFrame()
+    if not love.timer.sleep then return end
+    local now = love.timer.getTime()
+    local busy = appState == "splash" or download.active or syncing or heldInput or showRestartPopup or
+        now - lastInputAt < IDLE_AFTER or math.abs(scrollTarget - scrollY) > 0.5
+    local wait = (busy and ACTIVE_FRAME or IDLE_FRAME) - (now - lastFrameAt)
+    if wait > 0 then love.timer.sleep(wait) end
+    lastFrameAt = love.timer.getTime()
+end
+
 function love.update(dt)
+    throttleFrame()
     updateHeldInput(dt)
     scrollY = scrollY + (scrollTarget - scrollY) * math.min(1, dt * 14)
     if diagnostic.active then
@@ -1411,6 +1426,7 @@ local function onKey(key)
 end
 
 function love.textinput(text)
+    lastInputAt = love.timer.getTime()
     if showSearch and text:match("^[%w%s_-]+$") and #searchQuery < 40 then
         searchQuery = searchQuery .. text
         applySearch()
@@ -1608,6 +1624,7 @@ local REPEATABLE_BUTTONS = {dpup = true, dpdown = true, dpleft = true, dpright =
 local REPEATABLE_KEYS = {up = true, down = true, left = true, right = true, w = true, s = true}
 
 function love.keypressed(key)
+    lastInputAt = love.timer.getTime()
     onKey(key)
     if REPEATABLE_KEYS[key] then heldInput = {kind = "key", id = key, timer = REPEAT_DELAY} end
 end
@@ -1617,6 +1634,7 @@ function love.keyreleased(key)
 end
 
 function love.gamepadpressed(joystick, button)
+    lastInputAt = love.timer.getTime()
     onGamepadButton(joystick, button)
     if REPEATABLE_BUTTONS[button] then heldInput = {kind = "pad", id = button, timer = REPEAT_DELAY} end
 end
