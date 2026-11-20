@@ -139,7 +139,7 @@ function Torrent:launch(item, directory)
         ["continue"] = "true",
         ["check-integrity"] = "true",
         ["bt-max-peers"] = tostring(self.settings.maxPeers or 20),
-        ["max-upload-limit"] = self.settings.uploadLimit or "100K",
+        ["max-upload-limit"] = self.settings.uploadLimit or "1M",
         ["seed-time"] = tostring(self.settings.seedMinutes or 120),
         ["seed-ratio"] = tostring(self.settings.seedRatio or 1.0)
     }

@@ -195,7 +195,10 @@ class Aria2:
                          f"--listen-port={self.listen_port}", "--upload-limit=0",
                          # O nó público só apresenta (BEP 55) peers conectados a ele ao
                          # mesmo tempo; os limites de handheld o tornariam um gargalo.
-                         "--max-conns-per-torrent=200", "--half-open-per-torrent=25"]
+                         "--max-conns-per-torrent=200", "--half-open-per-torrent=25",
+                         # Na nuvem não há rede local; os peers chegam por tracker, DHT,
+                         # PEX e conexões diretas, que continuam ativos.
+                         "--local-discovery=false"]
         else:
             arguments = [self.binary, "--enable-rpc=true", "--rpc-listen-all=false",
                          f"--rpc-listen-port={self.rpc_port}", f"--rpc-secret={self.secret}",

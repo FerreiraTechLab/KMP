@@ -118,7 +118,7 @@ def daemon_status(config_dir: Path) -> dict:
             result["running"] = Path("/proc", pid_text).exists()
     except OSError:
         pass
-    settings = {"listen_port": "6881", "upload_limit": "100K", "download_limit": "0",
+    settings = {"listen_port": "6881", "upload_limit": "1M", "download_limit": "0",
                 "max_concurrent_downloads": "50", "seed_battery_min": "30",
                 "community_node": "1", "community_storage_mb": "4096"}
     try:

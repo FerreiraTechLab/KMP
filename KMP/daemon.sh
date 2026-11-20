@@ -24,7 +24,7 @@ python_binary=${KMP_PYTHON:-}
 if [ -z "$python_binary" ]; then
   python_binary=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
 fi
-daemon_version=13
+daemon_version=14
 
 backend_identity() {
   resolved=$aria2_binary
@@ -72,6 +72,16 @@ write_env() {
     printf 'KMP_ARIA2_SECRET=%s\n' "$rpc_secret"
   } > "$env_file.tmp"
   mv "$env_file.tmp" "$env_file"
+}
+
+# Cada console sorteia uma porta própria na primeira vez: com todos na 6881, o roteador
+# só abria a porta para o primeiro console da casa.
+ensure_listen_port() {
+  if [ -z "$(sed -n 's/^listen_port=//p' "$settings_file" 2>/dev/null | tail -n 1)" ]; then
+    random_value=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d '[:space:]')
+    case "$random_value" in ''|*[!0-9]*) random_value=$$ ;; esac
+    printf 'listen_port=%s\n' "$((random_value % 40000 + 20000))" >> "$settings_file"
+  fi
 }
 
 stop_monitor() {
@@ -159,8 +169,11 @@ case "$command_name" in
       printf 'aria2c não encontrado\n' >&2
       exit 1
     fi
+    ensure_listen_port
     listen_port=$(read_setting listen_port 6881)
-    upload_limit=$(read_setting upload_limit 100K)
+    # 1 MiB/s deixa um console servir outro na mesma casa; a semeação ainda pausa com
+    # bateria baixa.
+    upload_limit=$(read_setting upload_limit 1M)
     # Sem limite por padrão: com o limitador esgotado, a anacrolix não abre conexões novas
     # e o nó público do catálogo nunca é alcançado.
     download_limit=$(read_setting download_limit 0)

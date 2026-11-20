@@ -32,7 +32,7 @@ existing console seeder.
 1. Put the PortMaster files in the Ports directory: `KMP.sh` and `KMP/`.
 2. Open KMP from the Ports menu. It connects to its bundled `kmp-torrentd`
    daemon, which restores downloads and seeds from the previous session. The
-   default total upload limit is 100 KiB/s. No package manager is required.
+   default total upload limit is 1 MiB/s. No package manager is required.
 
 To validate a console-to-console transfer, open an uninstalled port's details
 and press **X**. This test removes that package from the receiving console,
@@ -43,7 +43,7 @@ empty directory and caps the receiving speed at 1 MiB/s so its progress and
 peer count remain visible on screen.
 
 Versioned PortMaster packages are stored in `dists/`. The current preview is
-`dists/KMP-v0.2.59.zip`; its contents match the layout in `KMP/port.json`.
+`dists/KMP-v0.2.60.zip`; its contents match the layout in `KMP/port.json`.
 
 When the BitTorrent daemon starts, the Client attempts to map its TCP and UDP
 listen port through UPnP and then NAT-PMP. The lease is renewed while the
