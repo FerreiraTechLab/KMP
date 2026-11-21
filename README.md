@@ -205,3 +205,20 @@ off the R36H before the test. Both peers should be on the same LAN. Run
 example `192.168.1.100:6881`. The app adds this direct peer to the magnet and
 also keeps local peer discovery enabled. The second portable can use the same
 preview package.
+
+## License
+
+Copyright (C) 2026 Weslei Ferreira Santos and KMP contributors.
+
+KMP is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version. See
+[LICENSE](LICENSE).
+
+Third-party components keep their own licenses:
+
+- `torrentd/third_party/anacrolix-torrent/` is a modified copy of
+  [anacrolix/torrent](https://github.com/anacrolix/torrent) under the Mozilla
+  Public License 2.0 (its `LICENSE` file; changes listed in `KMP-PATCH.md`);
+- the bundled `aria2c` fallback is licensed under the GNU GPL v2 or later and
+  LÖVE under the zlib license; their texts are in `KMP/licenses/`.
