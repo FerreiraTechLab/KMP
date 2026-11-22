@@ -24,6 +24,7 @@ jobs:
       - run: KMP_TEST_MODE=1 lua tests/main_throttle.lua
       - run: python3 tests/self_update.py
       - run: python3 tests/port_mapper.py
+      - run: python3 tests/battery_seed.py
       - run: python3 tests/seed_node.py
       - run: bash -n KMP.sh KMP/daemon.sh
 

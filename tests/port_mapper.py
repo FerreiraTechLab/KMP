@@ -1,3 +1,5 @@
+import sys
+import subprocess
 #!/usr/bin/env python3
 
 import importlib.util
@@ -37,6 +39,20 @@ class PortMapperTests(unittest.TestCase):
             mapping.renew()
             mapping.close()
         self.assertEqual(calls, [(2, 3600), (1, 3600), (2, 0), (1, 0)])
+
+
+    def test_set_process_name_escapes_killall_python3(self):
+        # O PortMaster roda `killall python3` ao sair de um port; o killall compara o comm.
+        if not Path("/proc/self/comm").exists():
+            self.skipTest("sem /proc")
+        code = ("import importlib.util, sys; "
+                "spec = importlib.util.spec_from_file_location('m', sys.argv[1]); "
+                "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+                "ok = m.set_process_name('kmp-portmap'); "
+                "print(ok, open('/proc/self/comm').read().strip())")
+        result = subprocess.run([sys.executable, "-c", code, str(ROOT / "KMP" / "port_mapper.py")],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.split(), ["True", "kmp-portmap"])
 
 
 if __name__ == "__main__":

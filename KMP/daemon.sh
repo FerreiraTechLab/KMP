@@ -24,7 +24,7 @@ python_binary=${KMP_PYTHON:-}
 if [ -z "$python_binary" ]; then
   python_binary=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
 fi
-daemon_version=14
+daemon_version=15
 
 backend_identity() {
   resolved=$aria2_binary

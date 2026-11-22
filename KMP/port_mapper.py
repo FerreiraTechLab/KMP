@@ -288,7 +288,23 @@ def run(port: int, state_path: Path, renew_seconds: int) -> int:
     return 0
 
 
+def set_process_name(name: str) -> bool:
+    """Troca o nome do processo (o que o ps e o killall veem).
+
+    Ao sair de qualquer port, o PortMaster roda `killall python3`. Sem isto, fechar o KMP
+    ou um jogo encerrava este processo, que deve viver junto com o kmp-torrentd: o
+    daemon.sh o controla pelo PID.
+    """
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        return libc.prctl(15, ctypes.c_char_p(name.encode()[:15]), 0, 0, 0) == 0  # PR_SET_NAME
+    except (OSError, AttributeError):
+        return False
+
+
 def main() -> int:
+    set_process_name("kmp-portmap")
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", required=True, type=int)
     parser.add_argument("--state", required=True, type=Path)

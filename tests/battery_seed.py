@@ -1,3 +1,5 @@
+import sys
+import subprocess
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -32,6 +34,20 @@ class BatterySeedTest(unittest.TestCase):
             path = Path(directory) / "paused.json"
             MODULE.save_paused(path, {"abc", "def"})
             self.assertEqual(MODULE.load_paused(path), {"abc", "def"})
+
+
+    def test_set_process_name_escapes_killall_python3(self):
+        # O PortMaster roda `killall python3` ao sair de um port; o killall compara o comm.
+        if not Path("/proc/self/comm").exists():
+            self.skipTest("sem /proc")
+        code = ("import importlib.util, sys; "
+                "spec = importlib.util.spec_from_file_location('m', sys.argv[1]); "
+                "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+                "ok = m.set_process_name('kmp-battery'); "
+                "print(ok, open('/proc/self/comm').read().strip())")
+        result = subprocess.run([sys.executable, "-c", code, str(ROOT / "KMP" / "battery_seed.py")],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.split(), ["True", "kmp-battery"])
 
 
 if __name__ == "__main__":
