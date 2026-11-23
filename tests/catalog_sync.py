@@ -212,5 +212,11 @@ class CatalogSyncTest(unittest.TestCase):
         self.assertEqual(result["sequence"], 9)
 
 
+    def test_safe_opener_is_reused_and_refuses_insecure_redirects(self):
+        # Um cliente novo por requisição acumulava SSLContexts no nó público.
+        first, second = SYNC.safe_opener(), SYNC.safe_opener()
+        self.assertIs(first, second)
+        self.assertTrue(any(isinstance(handler, SYNC.SafeRedirects) for handler in first.handlers))
+
 if __name__ == "__main__":
     unittest.main()

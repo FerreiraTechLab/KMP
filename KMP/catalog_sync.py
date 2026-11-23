@@ -38,6 +38,23 @@ class SafeRedirects(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+_OPENER = None
+
+
+def safe_opener():
+    """Um só cliente HTTP por processo, que recusa redirecionamentos sem HTTPS.
+
+    Cada build_opener cria um SSLContext novo, que carrega todos os certificados, e um
+    ciclo de referências entre o cliente e os handlers. Criado a cada requisição, esse
+    lixo cíclico se acumulava mais rápido do que o coletor do Python o recolhia: o nó
+    público, que consulta os espelhos a cada 5 minutos, chegava a centenas de MB.
+    """
+    global _OPENER
+    if _OPENER is None:
+        _OPENER = build_opener(SafeRedirects())
+    return _OPENER
+
+
 def atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
@@ -82,10 +99,9 @@ def fetch(source: str, name: str, limit: int, timeout: float = 8.0) -> bytes:
             raise VerificationError(f"resposta inválida em {source}")
         data = path.read_bytes()
     else:
-        opener = build_opener(SafeRedirects())
         request = Request(url, headers={"User-Agent": "KDownloader-PM/0.2"})
         try:
-            with opener.open(request, timeout=timeout) as response:
+            with safe_opener().open(request, timeout=timeout) as response:
                 if urlsplit(response.geturl()).scheme != "https":
                     raise VerificationError("resposta redirecionada para protocolo inseguro")
                 declared = response.headers.get("Content-Length")
@@ -93,6 +109,8 @@ def fetch(source: str, name: str, limit: int, timeout: float = 8.0) -> bytes:
                     raise VerificationError("resposta excede o limite")
                 data = response.read(limit + 1)
         except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+            if isinstance(exc, HTTPError):
+                exc.close()  # libera a conexão da resposta de erro sem esperar o coletor
             raise VerificationError(f"falha ao consultar {source}") from exc
     if not data or len(data) > limit:
         raise VerificationError(f"resposta inválida em {source}")
@@ -170,6 +188,8 @@ def rpc_client(endpoint: str, secret: str):
     if not re.fullmatch(r"[0-9a-f]{32,128}", secret):
         raise VerificationError("segredo RPC inválido")
 
+    opener = build_opener()  # um por cliente RPC, reaproveitado em todas as chamadas
+
     def call(method: str, params: list):
         if not re.fullmatch(r"aria2\.[A-Za-z]+", method):
             raise VerificationError("método RPC inválido")
@@ -177,7 +197,7 @@ def rpc_client(endpoint: str, secret: str):
                               "params": ["token:" + secret, *params]}).encode()
         request = Request(endpoint, data=payload, headers={"Content-Type": "application/json"})
         try:
-            with build_opener().open(request, timeout=5) as response:
+            with opener.open(request, timeout=5) as response:
                 result = json.loads(response.read(1024 * 1024 + 1))
         except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise VerificationError("falha no RPC do aria2") from exc

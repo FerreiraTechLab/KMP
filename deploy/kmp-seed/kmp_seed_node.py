@@ -19,12 +19,12 @@ import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit
-from urllib.request import Request, build_opener, urlopen
+from urllib.request import Request, urlopen
 
 from catalog_security import (VerificationError, enforce_monotonic,
                               load_verified_head, public_key_fingerprint,
                               save_sequence, verify_catalog)
-from catalog_sync import SafeRedirects, atomic_write, discover, read_sources
+from catalog_sync import atomic_write, discover, read_sources, safe_opener
 
 USER_AGENT = "KMP-Seed-Node/1"
 SUBMISSION_TORRENT = re.compile(r"^submissions/[a-z0-9][a-z0-9_-]*/[^/]+/torrents/[^/]+\.torrent$")
@@ -70,7 +70,7 @@ def download_file(sources: list[str], relative: str, destination: Path,
                     response = Path(parsed.path).open("rb")
                 else:
                     request = Request(url, headers={"User-Agent": USER_AGENT})
-                    response = build_opener(SafeRedirects()).open(request, timeout=30)
+                    response = safe_opener().open(request, timeout=30)
                     if urlsplit(response.geturl()).scheme != "https":
                         raise VerificationError("redirecionamento inseguro")
                 with response:
@@ -93,6 +93,8 @@ def download_file(sources: list[str], relative: str, destination: Path,
             os.replace(temporary, destination)
             return source
         except (HTTPError, URLError, TimeoutError, OSError, VerificationError) as exc:
+            if isinstance(exc, HTTPError):
+                exc.close()  # o 404 dos espelhos para pacotes grandes chega a cada ciclo
             errors.append(f"{source}: {exc}")
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
@@ -296,7 +298,7 @@ class SubmissionSeeder:
             headers["Accept"] = "application/vnd.github+json"
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
-        response = build_opener(SafeRedirects()).open(Request(url, headers=headers), timeout=30)
+        response = safe_opener().open(Request(url, headers=headers), timeout=30)
         with response:
             if urlsplit(response.geturl()).scheme != "https":
                 raise VerificationError("redirecionamento inseguro")
@@ -390,6 +392,57 @@ class SubmissionSeeder:
                 "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 
 
+class MemoryLog:
+    """Diagnóstico opcional de memória (KMP_SEED_MEMLOG=1): a cada ciclo, grava o RSS, a
+    memória dos objetos Python rastreada pelo tracemalloc e as linhas que mais cresceram
+    desde o primeiro ciclo. Se o RSS cresce e o rastreado não, o acúmulo está fora do
+    Python (bibliotecas em C ou fragmentação do malloc)."""
+
+    def __init__(self, path: Path):
+        import tracemalloc
+        self.tracemalloc, self.path, self.baseline, self.types = tracemalloc, path, None, None
+        tracemalloc.start(10)
+
+    def record(self) -> None:
+        import gc
+        from collections import Counter
+        # Conta os tipos antes do snapshot: o próprio snapshot guarda uma tupla por alocação
+        # rastreada e inflaria a contagem.
+        # Antes da coleta: quantos clientes HTTP e contextos SSL estão vivos naturalmente.
+        natural = Counter(type(obj).__name__ for obj in gc.get_objects()
+                          if type(obj).__name__ in ("OpenerDirector", "SSLContext"))
+        gc.collect()
+        types = Counter(type(obj).__name__ for obj in gc.get_objects())
+        objects = sum(types.values())
+        if self.types is None:
+            self.types = types
+        grown = sorted(((count - self.types.get(name, 0), name) for name, count in types.items()),
+                       reverse=True)[:10]
+        rss = 0
+        with open("/proc/self/status") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    rss = int(line.split()[1])
+        current, peak = self.tracemalloc.get_traced_memory()
+        snapshot = self.tracemalloc.take_snapshot().filter_traces(
+            [self.tracemalloc.Filter(False, self.tracemalloc.__file__)])
+        # A base fica como dicionário simples (linha → bytes), não como o snapshot inteiro.
+        sizes = {f"{Path(stat.traceback[0].filename).name}:{stat.traceback[0].lineno}": stat.size
+                 for stat in snapshot.statistics("lineno")}
+        del snapshot
+        if self.baseline is None:
+            self.baseline = sizes
+        diffs = sorted(((size - self.baseline.get(line, 0), line) for line, size in sizes.items()),
+                       reverse=True)[:8]
+        entry = {"t": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rssKiB": rss,
+                 "tracedKiB": current // 1024, "tracedPeakKiB": peak // 1024, "gcObjects": objects,
+                 "linesGrownKiB": {line: round(diff / 1024, 1) for diff, line in diffs if diff > 0},
+                 "typesGrown": {name: diff for diff, name in grown if diff > 0},
+                 "httpBeforeGc": dict(natural)}
+        with open(self.path, "a") as handle:
+            handle.write(json.dumps(entry) + "\n")
+
+
 class SeedNode:
     def __init__(self, args):
         self.args, self.root = args, args.root
@@ -403,6 +456,7 @@ class SeedNode:
             self.aria, self.root, args.submissions_repo, args.submission_policy,
             os.environ.get("KMP_GITHUB_TOKEN")) if args.submissions_repo else None
         self.stopping = False
+        self.memlog = MemoryLog(self.root / "memlog.jsonl") if os.environ.get("KMP_SEED_MEMLOG") else None
 
     def stop(self, *_args) -> None:
         self.stopping = True
@@ -481,6 +535,11 @@ class SeedNode:
                         status = {"error": str(exc)}
                     atomic_write(self.root / "submissions.json",
                                  (json.dumps(status, indent=2, sort_keys=True) + "\n").encode(), 0o600)
+                if self.memlog:
+                    try:
+                        self.memlog.record()
+                    except Exception as exc:  # o diagnóstico nunca derruba o nó
+                        print(json.dumps({"memlog": str(exc)}), file=sys.stderr, flush=True)
                 deadline = time.monotonic() + self.args.interval
                 while not self.stopping and time.monotonic() < deadline:
                     time.sleep(min(1, deadline - time.monotonic()))
