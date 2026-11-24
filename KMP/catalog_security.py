@@ -31,14 +31,112 @@ class VerificationError(ValueError):
     pass
 
 
-def public_key_fingerprint(public_key: Path) -> str:
-    result = subprocess.run(
-        ["openssl", "pkey", "-pubin", "-in", str(public_key), "-outform", "DER"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
-    )
-    if result.returncode != 0 or not result.stdout:
+# Ed25519 (RFC 8032, seção 6) em Python puro. O OpenSSL 1.1.1 dos firmwares baseados no
+# Ubuntu 19.10 (ArkOS antigo, por exemplo) não verifica Ed25519 pela linha de comando:
+# o "pkeyutl -rawin" só existe a partir do OpenSSL 3.0. Sem este caminho, todo catálogo
+# seria recusado como "assinatura inválida" nesses consoles.
+_P = 2 ** 255 - 19
+_Q = 2 ** 252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+_ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+
+
+def _ed_add(a, b):
+    x1, y1, z1, t1 = a
+    x2, y2, z2, t2 = b
+    k1 = (y1 - x1) * (y2 - x2) % _P
+    k2 = (y1 + x1) * (y2 + x2) % _P
+    k3 = 2 * t1 * t2 * _D % _P
+    k4 = 2 * z1 * z2 % _P
+    e, f, g, h = k2 - k1, k4 - k3, k4 + k3, k2 + k1
+    return (e * f % _P, g * h % _P, f * g % _P, e * h % _P)
+
+
+def _ed_mul(scalar: int, point):
+    result = (0, 1, 1, 0)
+    while scalar > 0:
+        if scalar & 1:
+            result = _ed_add(result, point)
+        point = _ed_add(point, point)
+        scalar >>= 1
+    return result
+
+
+def _ed_recover_x(y: int, sign: int):
+    if y >= _P:
+        return None
+    x2 = (y * y - 1) * pow(_D * y * y + 1, _P - 2, _P) % _P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P:
+        return None
+    if (x & 1) != sign:
+        x = _P - x
+    return x
+
+
+def _ed_decompress(data: bytes):
+    if len(data) != 32:
+        return None
+    y = int.from_bytes(data, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _ed_recover_x(y, sign)
+    return None if x is None else (x, y, 1, x * y % _P)
+
+
+_ED_GY = 4 * pow(5, _P - 2, _P) % _P
+_ED_G = (_ed_recover_x(_ED_GY, 0), _ED_GY, 1, _ed_recover_x(_ED_GY, 0) * _ED_GY % _P)
+
+
+def ed25519_verify(public: bytes, message: bytes, signature: bytes) -> bool:
+    """Verificação Ed25519 de referência; rejeita pontos inválidos e S fora do intervalo."""
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    point_a = _ed_decompress(public)
+    point_r = _ed_decompress(signature[:32])
+    scalar = int.from_bytes(signature[32:], "little")
+    if point_a is None or point_r is None or scalar >= _Q:
+        return False
+    digest = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(), "little") % _Q
+    left = _ed_mul(scalar, _ED_G)
+    right = _ed_add(point_r, _ed_mul(digest, point_a))
+    return ((left[0] * right[2] - right[0] * left[2]) % _P == 0 and
+            (left[1] * right[2] - right[1] * left[2]) % _P == 0)
+
+
+def _public_key_der(public_key: Path) -> bytes:
+    """Lê a chave pública Ed25519 do PEM sem depender do openssl."""
+    try:
+        text = public_key.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise VerificationError("chave pública inválida") from exc
+    match = re.search(r"-----BEGIN PUBLIC KEY-----(.*?)-----END PUBLIC KEY-----", text, re.S)
+    try:
+        der = base64.b64decode("".join(match.group(1).split()), validate=True) if match else b""
+    except (binascii.Error, ValueError) as exc:
+        raise VerificationError("chave pública inválida") from exc
+    if len(der) != len(_ED25519_SPKI_PREFIX) + 32 or not der.startswith(_ED25519_SPKI_PREFIX):
         raise VerificationError("chave pública inválida")
-    return hashlib.sha256(result.stdout).hexdigest()
+    return der
+
+
+def public_key_fingerprint(public_key: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["openssl", "pkey", "-pubin", "-in", str(public_key), "-outform", "DER"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+        )
+        if result.returncode == 0 and result.stdout:
+            return hashlib.sha256(result.stdout).hexdigest()
+    except OSError:
+        pass
+    # Sem openssl utilizável, o DER sai do próprio PEM; o fingerprint é o mesmo.
+    return hashlib.sha256(_public_key_der(public_key)).hexdigest()
 
 
 def validate_public_key(data: bytes) -> str:
@@ -68,14 +166,22 @@ def verify_signature(data: bytes, signature: bytes, public_key: Path) -> None:
         signature_path = Path(temporary, "signature")
         data_path.write_bytes(data)
         signature_path.write_bytes(signature)
-        result = subprocess.run(
-            ["openssl", "pkeyutl", "-verify", "-pubin", "-rawin",
-             "-inkey", str(public_key), "-in", str(data_path),
-             "-sigfile", str(signature_path)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, check=False,
-        )
-    if result.returncode != 0:
+        try:
+            result = subprocess.run(
+                ["openssl", "pkeyutl", "-verify", "-pubin", "-rawin",
+                 "-inkey", str(public_key), "-in", str(data_path),
+                 "-sigfile", str(signature_path)],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, check=False,
+            )
+            if result.returncode == 0:
+                return
+        except OSError:
+            pass
+    # O openssl recusou ou não suporta Ed25519 pela linha de comando (OpenSSL 1.1.1):
+    # a verificação de referência decide. Uma assinatura falsa é recusada pelos dois.
+    raw_key = _public_key_der(public_key)[len(_ED25519_SPKI_PREFIX):]
+    if not ed25519_verify(raw_key, data, signature):
         raise VerificationError("assinatura inválida")
 
 

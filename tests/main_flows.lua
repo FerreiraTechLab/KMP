@@ -71,6 +71,31 @@ love.gamepadpressed(nil, "b")
 assert(channel("torrent_cancel"):pop() == true)
 assert(api.snapshot().downloadStatus == "Interrompendo download...")
 
+-- Port que o autor não listou para este firmware: avisa antes de baixar; B cancela, A prossegue.
+api.reset()
+api.setCatalog({game({firmwareUnverified = true, testedFirmwares = {"darkos", "rocknix"}})})
+love.gamepadpressed(nil, "a")
+love.gamepadpressed(nil, "a")
+assert(event("firmware_warning") and api.snapshot().firmwareWarning == "example")
+assert(not event("install") and not api.snapshot().downloadActive, "não pode baixar antes da confirmação")
+love.gamepadpressed(nil, "b")
+assert(api.snapshot().firmwareWarning == nil and not api.snapshot().downloadActive)
+love.gamepadpressed(nil, "a")
+love.gamepadpressed(nil, "a")
+love.gamepadpressed(nil, "a")
+assert(event("install") and api.snapshot().downloadActive, "A confirma e inicia o download")
+love.gamepadpressed(nil, "b")
+channel("torrent_cancel"):pop()
+
+-- O mesmo aviso vale para o download só por P2P (X).
+api.reset()
+api.setCatalog({game({firmwareUnverified = true})})
+love.gamepadpressed(nil, "a")
+love.gamepadpressed(nil, "x")
+assert(api.snapshot().firmwareWarning == "example" and not event("p2p_test"))
+love.gamepadpressed(nil, "a")
+assert(event("p2p_test"))
+
 -- O teste P2P é acionado por X em um port ainda não instalado.
 api.reset()
 api.setCatalog({game()})

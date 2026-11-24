@@ -43,13 +43,18 @@ function Catalog.deviceProfile(environment)
     }
 end
 
-local function compatible(variant, profile)
+-- Surgem firmwares novos o tempo todo, e o autor de um port só lista os que testou. Por isso
+-- um firmware fora da lista "include" não bloqueia: com ignoreFirmwareList, a variante é
+-- aceita e o Client avisa antes do download. Já "exclude" é uma incompatibilidade declarada
+-- pelo autor, e arquitetura, RAM, analógicos e runtimes continuam obrigatórios.
+local function compatible(variant, profile, ignoreFirmwareList)
     local compatibility, requirements = variant.compatibility, variant.requirements
     if type(compatibility) ~= "table" or type(requirements) ~= "table" then return false end
     if not contains(compatibility.architectures, profile.architecture) then return false end
     local firmwares = compatibility.firmwares or {}
     if contains(firmwares.exclude, profile.firmware) then return false end
-    if firmwares.include and not contains(firmwares.include, profile.firmware) then return false end
+    if firmwares.include and not ignoreFirmwareList and
+       not contains(firmwares.include, profile.firmware) then return false end
     for _, capability in ipairs(variant.requiredCapabilities or {}) do
         if not profile.capabilities[capability] then return false end
     end
@@ -76,27 +81,37 @@ local function selectVariant(item, profile)
     if type(release) ~= "table" or type(release.variants) ~= "table" or #release.variants == 0 then
         return nil, "release sem variantes"
     end
-    local selected
     for _, variant in ipairs(release.variants) do
         if not safeId(variant.id) or type(variant.priority) ~= "number" or
            variant.priority % 1 ~= 0 or variant.priority < 0 then
             return nil, "variante inválida"
         end
-        if compatible(variant, profile) then
-            if not selected or variant.priority > selected.priority then
-                selected = variant
-            elseif variant.priority == selected.priority then
-                return nil, "variantes compatíveis empatadas"
+    end
+    -- Primeiro as variantes confirmadas para o firmware; só sem nenhuma, as que o autor não
+    -- listou para ele (o terceiro retorno marca a escolha como não confirmada).
+    for _, ignoreFirmwareList in ipairs({false, true}) do
+        local selected
+        for _, variant in ipairs(release.variants) do
+            if compatible(variant, profile, ignoreFirmwareList) then
+                if not selected or variant.priority > selected.priority then
+                    selected = variant
+                elseif variant.priority == selected.priority then
+                    return nil, "variantes compatíveis empatadas"
+                end
             end
         end
+        if selected then return selected, nil, ignoreFirmwareList end
     end
-    return selected
+    return nil
 end
 
-local function normalizeV3(item, variant)
+local function normalizeV3(item, variant, firmwareUnverified)
     local release, download = item.release, variant.download
     if type(download) ~= "table" or type(variant.install) ~= "table" then return nil end
+    local firmwares = type(variant.compatibility) == "table" and variant.compatibility.firmwares or nil
     return {
+        firmwareUnverified = firmwareUnverified == true,
+        testedFirmwares = firmwareUnverified and type(firmwares) == "table" and firmwares.include or nil,
         id = item.id, name = item.name, description = item.description,
         license = item.license, homepage = item.homepage, source = item.source,
         porter = item.porter, redistribution = item.redistribution,
@@ -210,7 +225,7 @@ function Catalog.validate(document, profile)
     local portIds = {}
     local roots = {}
     local items = {}
-    local incompatible = 0
+    local incompatible, unverified = 0, 0
     profile = profile or Catalog.deviceProfile()
     for index, source in ipairs(document.items) do
         local item = source
@@ -223,10 +238,13 @@ function Catalog.validate(document, profile)
                source.release.channel ~= "stable" then
                 return nil, "item " .. index .. ": release v3 inválida"
             end
-            local variant, variantError = selectVariant(source, profile)
+            local variant, variantError, firmwareUnverified = selectVariant(source, profile)
             if variantError then return nil, "item " .. index .. ": " .. variantError end
             if not variant then incompatible = incompatible + 1; item = nil
-            else item = normalizeV3(source, variant) end
+            else
+                item = normalizeV3(source, variant, firmwareUnverified)
+                if firmwareUnverified and source.id ~= "kmp-client" then unverified = unverified + 1 end
+            end
         end
         local valid, err
         if item then
@@ -239,7 +257,7 @@ function Catalog.validate(document, profile)
     end
     return items, nil, {schemaVersion = document.schemaVersion,
         sequence = document.sequence, generatedAt = document.generatedAt,
-        incompatible = incompatible, revocations = document.revocations or {},
+        incompatible = incompatible, unverified = unverified, revocations = document.revocations or {},
         seedNodes = Catalog.seedNodes(document)}
 end
 
@@ -275,6 +293,38 @@ function Catalog.isUpdate(installed, available, installedRevision, availableRevi
         return false
     end
     return true
+end
+
+-- Traduz o erro do catalog_sync.py numa frase curta que diz ao usuário o que conferir.
+-- A ordem importa: o discover junta os erros de todos os espelhos numa frase só.
+local SYNC_FAILURES = {
+    {{"data de publicação está no futuro", "relógio local", "not yet valid"},
+        "Relógio do console atrasado: ajuste a data e a hora."},
+    {{"head expirado", "certificate has expired"},
+        "Catálogo vencido ou relógio adiantado: confira a data e a hora."},
+    {{"name or service not known", "temporary failure in name resolution",
+      "no address associated", "nodename nor servname"},
+        "Sem DNS: o console não encontrou os servidores do catálogo."},
+    {{"certificate verify failed", "ssl"},
+        "Falha de HTTPS: confira a data do console e os certificados."},
+    {{"tempo esgotado ao baixar o catálogo"},
+        "O catálogo não chegou a tempo pelo BitTorrent."},
+    {{"rpc", "aria2"}, "Motor BitTorrent sem resposta: reabra o KMP."},
+    {{"downgrade"}, "Catálogo recusado: mais antigo que o já aceito."},
+    {{"assinatura"}, "Catálogo recusado: assinatura inválida."},
+    {{"falha ao consultar", "timed out", "unreachable", "refused", "reset"},
+        "Sem acesso aos servidores do catálogo (GitHub)."},
+}
+
+function Catalog.syncFailureMessage(errorText)
+    if type(errorText) ~= "string" or errorText == "" then return nil end
+    local lowered = errorText:lower()
+    for _, rule in ipairs(SYNC_FAILURES) do
+        for _, needle in ipairs(rule[1]) do
+            if lowered:find(needle, 1, true) then return rule[2] end
+        end
+    end
+    return "Falha no catálogo: " .. errorText:sub(1, 60)
 end
 
 return Catalog

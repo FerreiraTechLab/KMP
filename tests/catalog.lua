@@ -94,4 +94,35 @@ assert(seededMetadata.seedNodes[1] == "163.176.18.211:6881" and seededMetadata.s
 v3document.extensions = {["kmp.seed-nodes"] = "163.176.18.211:6881"}
 assert(#select(3, Catalog.validate(v3document, profile)).seedNodes == 0)
 assert(#Catalog.seedNodes({schemaVersion = 2, extensions = {["kmp.seed-nodes"] = {"1.2.3.4:6881"}}}) == 0)
+-- Firmware fora da lista do autor: o port aparece marcado como não confirmado; "exclude" bloqueia.
+profile.architecture, profile.firmware = "aarch64", "unofficialos"
+v3document.extensions = nil
+local variant = v3document.items[1].release.variants[1]
+variant.compatibility.firmwares = {include = {"darkos", "rocknix"}}
+local soft, _, softMetadata = Catalog.validate(v3document, profile)
+assert(#soft == 1 and soft[1].firmwareUnverified == true, "port fora da lista deveria aparecer")
+assert(soft[1].testedFirmwares[1] == "darkos" and soft[1].testedFirmwares[2] == "rocknix")
+assert(softMetadata.incompatible == 0 and softMetadata.unverified == 1)
+profile.firmware = "rocknix"
+local listed, _, listedMetadata = Catalog.validate(v3document, profile)
+assert(#listed == 1 and listed[1].firmwareUnverified == false and listedMetadata.unverified == 0)
+variant.compatibility.firmwares = {include = {"darkos"}, exclude = {"rocknix"}}
+local blocked, _, blockedMetadata = Catalog.validate(v3document, profile)
+assert(#blocked == 0 and blockedMetadata.incompatible == 1, "exclude continua bloqueando")
+variant.compatibility.firmwares = nil
+profile.architecture = "armhf"
+assert(#Catalog.validate(v3document, profile) == 0, "arquitetura continua obrigatória")
+profile.architecture = "aarch64"
+
+-- Mensagens de falha da sincronização: o relógio vem antes dos demais, mesmo misturado a outros espelhos.
+local clock = Catalog.syncFailureMessage("nenhum head válido; https://a/: data de publicação está no futuro; https://b/: falha ao consultar https://b/ (timed out)")
+assert(clock:find("Relógio do console atrasado", 1, true), clock)
+assert(Catalog.syncFailureMessage("falha ao consultar https://a/ ([SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate is not yet valid)"):find("Relógio", 1, true))
+assert(Catalog.syncFailureMessage("relógio local inválido ou atrasado"):find("Relógio", 1, true))
+assert(Catalog.syncFailureMessage("nenhum head válido; https://a/: falha ao consultar https://a/ ([Errno -3] Temporary failure in name resolution)"):find("Sem DNS", 1, true))
+assert(Catalog.syncFailureMessage("nenhum head válido; https://a/: falha ao consultar https://a/ (timed out)"):find("Sem acesso", 1, true))
+assert(Catalog.syncFailureMessage("falha no RPC do aria2"):find("Motor BitTorrent", 1, true))
+assert(Catalog.syncFailureMessage("head expirado"):find("vencido", 1, true))
+assert(Catalog.syncFailureMessage("algo inesperado"):find("^Falha no catálogo: algo inesperado"))
+assert(Catalog.syncFailureMessage("") == nil and Catalog.syncFailureMessage(nil) == nil)
 print("catalog tests: ok")

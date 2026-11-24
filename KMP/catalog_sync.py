@@ -111,7 +111,10 @@ def fetch(source: str, name: str, limit: int, timeout: float = 8.0) -> bytes:
         except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
             if isinstance(exc, HTTPError):
                 exc.close()  # libera a conexão da resposta de erro sem esperar o coletor
-            raise VerificationError(f"falha ao consultar {source}") from exc
+            # O motivo (certificado ainda não válido, DNS, tempo esgotado…) é o que permite ao
+            # Client dizer ao usuário o que conferir, por exemplo a data do console.
+            reason = str(getattr(exc, "reason", None) or exc).replace(";", ",")[:120]
+            raise VerificationError(f"falha ao consultar {source} ({reason})") from exc
     if not data or len(data) > limit:
         raise VerificationError(f"resposta inválida em {source}")
     return data

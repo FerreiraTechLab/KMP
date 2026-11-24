@@ -24,6 +24,7 @@ LOG_FILES = (
     ("aria2-old.log", "conf/daemon/aria2.log.old"),
     ("battery-monitor.log", "conf/daemon/battery-monitor.log"),
     ("network-metrics.jsonl", "conf/network-metrics.jsonl"),
+    ("catalog-sync.json", "conf/catalog/last-sync.json"),
 )
 SECRET_FILES = ("conf/daemon/rpc.secret", "conf/daemon/rpc.env")
 REDACTIONS = (
@@ -223,7 +224,12 @@ def torrent_summary(state_dir: Path) -> dict:
 def catalog_status(config_dir: Path) -> dict:
     state = read_json(config_dir / "catalog/state.json")
     active = read_json(config_dir / "catalog/active.json")
+    last_sync = read_json(config_dir / "catalog/last-sync.json")
     return {
+        # Resultado da última sincronização: o erro (relógio, DNS, HTTPS…) explica uma lista vazia.
+        "lastSyncOk": last_sync.get("ok"),
+        "lastSyncError": last_sync.get("error"),
+        "lastSyncMirrorErrors": last_sync.get("mirrorErrors"),
         "acceptedSequence": state.get("highestSequence", 0),
         "lastTrustedTime": state.get("lastTrustedTime"),
         "activeSchemaVersion": active.get("schemaVersion"),

@@ -54,6 +54,12 @@ class DiagnosticTest(unittest.TestCase):
             (config / "catalog/active.json").write_text(
                 '{"schemaVersion":3,"sequence":6,"items":[{},{}]}')
             self.assertEqual(MODULE.catalog_status(config)["acceptedSequence"], 6)
+            self.assertIsNone(MODULE.catalog_status(config)["lastSyncError"])
+            (config / "catalog/last-sync.json").write_text(
+                '{"ok": false, "error": "nenhum head válido; https://a/: data de publicação está no futuro"}')
+            status = MODULE.catalog_status(config)
+            self.assertIs(status["lastSyncOk"], False)
+            self.assertIn("data de publicação está no futuro", status["lastSyncError"])
         summary = MODULE.summarize_torrents([
             [{"status": "active", "totalLength": "10", "completedLength": "10"}],
             [{"status": "paused", "totalLength": "20", "completedLength": "20"}],

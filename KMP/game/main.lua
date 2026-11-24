@@ -14,6 +14,10 @@ local CATALOG_STATE = os.getenv("KMP_CATALOG_STATE") or ""
 local CATALOG_PENDING = os.getenv("KMP_CATALOG_PENDING") or ""
 local CATALOG_DOWNLOADS = os.getenv("KMP_CATALOG_DOWNLOADS") or ""
 local CATALOG_ACTIVE = os.getenv("KMP_CATALOG_ACTIVE") or ""
+-- Resultado da última sincronização, ao lado do estado do catálogo para entrar no pacote de
+-- diagnóstico; sem o estado (modo de teste), fica no /tmp como antes.
+local CATALOG_SYNC_RESULT = (CATALOG_STATE:match("^(.*)/[^/]+$") or "") ~= "" and
+    CATALOG_STATE:match("^(.*)/[^/]+$") .. "/last-sync.json" or "/tmp/kmp_catalog_sync_result.json"
 local PYTHON = os.getenv("KMP_PYTHON") or "python3"
 local TEST_MODE = os.getenv("KMP_TEST_MODE") == "1"
 local DIAGNOSTIC_TOOL = os.getenv("KMP_DIAGNOSTIC") or ""
@@ -124,6 +128,8 @@ end
 local showRestartPopup = false
 local restartPopupTimer = 0
 local showClientUpdatePopup = false
+-- Download pendente de um port que o autor não listou para este firmware: {game, peerOnly}.
+local firmwareWarning = nil
 
 local showUninstallPopup = false
 local gameToUninstall = nil
@@ -406,7 +412,7 @@ function startSync()
     local savePath = distributed and CATALOG_ACTIVE or
         (isWindows() and "kpm_catalog.json" or "/tmp/kpm_catalog.json")
     if distributed then
-        local resultPath = "/tmp/kmp_catalog_sync_result.json"
+        local resultPath = CATALOG_SYNC_RESULT
         os.remove(resultPath)
         local sync_thread = love.thread.newThread([[
             local python, script, sources, publicKey, state, pending, downloads,
@@ -468,6 +474,21 @@ local function saveCatalogCache(content)
     os.rename(saveDirectory .. "/catalog-cache.json.tmp", saveDirectory .. "/catalog-cache.json")
 end
 
+-- Motivo da última falha de sincronização, já traduzido para o usuário.
+local function syncFailureReason()
+    local file = io.open(CATALOG_SYNC_RESULT, "r")
+    if not file then return nil end
+    local content = file:read("*a") or ""
+    file:close()
+    local parsed = Json.decode(content)
+    local errorText = type(parsed) == "table" and parsed.error or nil
+    if type(errorText) ~= "string" then
+        -- Sem JSON (por exemplo, um traceback do Python), usa a última linha não vazia.
+        errorText = content:match("([^\n]+)%s*$")
+    end
+    return Catalog.syncFailureMessage(errorText)
+end
+
 function finishSync(event)
     syncing = false
     local distributed = type(event) == "table" and event.distributed
@@ -483,9 +504,10 @@ function finishSync(event)
         items, errorMessage, metadata = decodeCatalog(cached)
         fromCache = items ~= nil
     end
+    local failure = distributed and not event.ok and syncFailureReason() or nil
     if not items then
         syncStatus = "Modo Offline"
-        download.statusText = errorMessage or "Sem Internet ou catálogo válido."
+        download.statusText = failure or errorMessage or "Sem Internet ou catálogo válido."
         download.statusColor = {1.0, 0.3, 0.3}
         isOffline = true
         return
@@ -518,7 +540,8 @@ function finishSync(event)
     if incompatiblePorts > 0 then
         syncStatus = syncStatus .. " | " .. incompatiblePorts .. " incompatível(is)"
     end
-    download.statusText = fromCache and "Usando catálogo salvo." or "Lista sincronizada com sucesso!"
+    download.statusText = fromCache and (failure and ("Catálogo salvo. " .. failure) or "Usando catálogo salvo.") or
+        "Lista sincronizada com sucesso!"
     download.statusColor = {0.2, 0.85, 0.45}
     if clientUpdateNotice then
         download.statusText, download.statusColor = clientUpdateNotice.text, clientUpdateNotice.color
@@ -592,6 +615,7 @@ local function throttleFrame()
     if not love.timer.sleep then return end
     local now = love.timer.getTime()
     local busy = appState == "splash" or download.active or syncing or heldInput or showRestartPopup or
+        firmwareWarning ~= nil or
         now - lastInputAt < IDLE_AFTER or math.abs(scrollTarget - scrollY) > 0.5
     local wait = (busy and ACTIVE_FRAME or IDLE_FRAME) - (now - lastFrameAt)
     if wait > 0 then love.timer.sleep(wait) end
@@ -1011,6 +1035,13 @@ function startDownload(game, peerOnly, updateMode)
         download.statusColor = {1.0, 0.3, 0.3}
         return
     end
+    -- O autor não listou este firmware: pergunta antes de baixar. Atualizações de um port
+    -- já instalado não perguntam de novo.
+    if game.firmwareUnverified and not game.firmwareAccepted and not updateMode then
+        firmwareWarning = {game = game, peerOnly = peerOnly}
+        if TEST_MODE then recordTestEvent("firmware_warning", {id = game.id}) end
+        return
+    end
     return startTorrentDownload(game, peerOnly == true, updateMode == true)
 end
 
@@ -1209,6 +1240,7 @@ if TEST_MODE then
             appState = "main"
             showMenu, showSearch, showDetails = false, false, false
             showUninstallPopup, showRestartPopup, showClientUpdatePopup = false, false, false
+            firmwareWarning = nil
             menuSelected, powerMenuSelected, selectedIdx = 1, 1, 1
             storeTab, heldInput, axisDirection = 1, nil, {leftx = 0, lefty = 0}
             searchQuery, searchSelected = "", 1
@@ -1233,13 +1265,31 @@ if TEST_MODE then
                 searchQuery = searchQuery, downloadActive = download.active,
                 downloadStatus = download.statusText, diagnostic = diagnostic,
                 clientUpdate = clientUpdate, showClientUpdatePopup = showClientUpdatePopup,
+                firmwareWarning = firmwareWarning and firmwareWarning.game.id or nil,
                 installedPorts = #installedPorts, storeTab = storeTab, visiblePorts = #catalog}
         end,
     }
 end
 
+local function answerFirmwareWarning(proceed)
+    local pending = firmwareWarning
+    firmwareWarning = nil
+    if proceed and pending then
+        pending.game.firmwareAccepted = true
+        startDownload(pending.game, pending.peerOnly)
+    end
+end
+
 local function onKey(key)
     if appState == "splash" then return end
+
+    if firmwareWarning then
+        if key == "return" then answerFirmwareWarning(true)
+        elseif key == "escape" or key == "backspace" or key == "b" or key == "space" then
+            answerFirmwareWarning(false)
+        end
+        return
+    end
 
     if showClientUpdatePopup then
         if key == "b" or key == "return" then
@@ -1435,6 +1485,12 @@ end
 
 local function onGamepadButton(joystick, button)
     if appState == "splash" then return end
+
+    if firmwareWarning then
+        if button == "a" then answerFirmwareWarning(true)
+        elseif button == "b" or button == "back" then answerFirmwareWarning(false) end
+        return
+    end
 
     if showClientUpdatePopup then
         if button == "a" then
@@ -2609,6 +2665,36 @@ function love.draw()
             love.graphics.setColor(0.45, 0.52, 0.62)
             love.graphics.setFont(fontSub)
             love.graphics.printf("Aperte qualquer botao para fechar", 100, 312, 440, "center")
+        end
+
+        if firmwareWarning then
+            local tested = table.concat(firmwareWarning.game.testedFirmwares or {}, ", ")
+            local firmware = os.getenv("KMP_FIRMWARE") or ""
+            love.graphics.setColor(0, 0, 0, 0.82)
+            love.graphics.rectangle("fill", 0, 0, 640, 480)
+            love.graphics.setColor(0.08, 0.12, 0.18, 0.99)
+            love.graphics.rectangle("fill", 70, 115, 500, 255, 14, 14)
+            love.graphics.setColor(1.0, 0.72, 0.25)
+            love.graphics.setLineWidth(2)
+            love.graphics.rectangle("line", 70, 115, 500, 255, 14, 14)
+            love.graphics.setFont(fontTitle)
+            love.graphics.printf("FIRMWARE NÃO CONFIRMADO", 90, 140, 460, "center")
+            love.graphics.setColor(0.86, 0.9, 0.96)
+            love.graphics.setFont(fontItem)
+            love.graphics.printf("O autor de " .. firmwareWarning.game.name .. " não informou que ele roda no seu firmware" ..
+                (firmware ~= "" and (" (" .. firmware .. ")") or "") .. ". Pode haver instabilidade ou travamento.",
+                90, 182, 460, "center")
+            if tested ~= "" then
+                love.graphics.setColor(0.55, 0.68, 0.82)
+                love.graphics.setFont(fontSub)
+                love.graphics.printf("Testado pelo autor em: " .. tested, 90, 272, 460, "center")
+            end
+            love.graphics.setColor(0.86, 0.9, 0.96)
+            love.graphics.setFont(fontItem)
+            love.graphics.printf("Deseja prosseguir?", 90, 302, 460, "center")
+            love.graphics.setColor(0.55, 0.68, 0.82)
+            love.graphics.setFont(fontSub)
+            love.graphics.printf("A: baixar mesmo assim   B: cancelar", 90, 335, 460, "center")
         end
 
         if showClientUpdatePopup then
