@@ -26,6 +26,11 @@ jobs:
       - run: python3 tests/port_mapper.py
       - run: python3 tests/battery_seed.py
       - run: python3 tests/seed_node.py
+      - run: python3 tests/catalog_security.py
+      - run: python3 tests/catalog_sync.py
+      - run: python3 tests/diagnostic.py
+      - run: python3 tests/community_node.py
+      - run: python3 tests/install.py
       - run: bash -n KMP.sh KMP/daemon.sh
 
   torrent-engine:
